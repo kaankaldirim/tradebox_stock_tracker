@@ -8,12 +8,50 @@ import requests
 from bs4 import BeautifulSoup
 import feedparser
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(page_title="Tradebox Stock Tracker", layout="wide")
-st.title("📈 Tradebox Stock Tracker")
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap');
+.header-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 3em;
+    color: #FFD700;
+    letter-spacing: 2px;
+    text-shadow: 0 2px 8px #222, 0 0px 1px #FFD700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 0.1em;
+}
+.header-emoji {
+    font-size: 1.3em;
+    margin-right: 18px;
+    animation: bounce 1.2s infinite alternate;
+}
+@keyframes bounce {
+    0% { transform: translateY(0);}
+    100% { transform: translateY(-8px);}
+}
+.header-underline {
+    width: 60%;
+    margin: 0 auto 18px auto;
+    border: 0;
+    border-top: 3px solid #FFD700;
+    opacity: 0.7;
+}
+</style>
+<div class="header-title">
+  <span class="header-emoji">📈🚀</span>
+  Tradebox Stock Tracker
+</div>
+<hr class="header-underline">
+""", unsafe_allow_html=True)
 
-# --- RETRO STOCK MARKET BAR ---
+# --- MODERN INDEX CARDS ---
 import yfinance as yf
+import time
 
 major_indices = {
     'NASDAQ 100': '^NDX',
@@ -24,32 +62,66 @@ major_indices = {
 }
 
 @st.cache_data(ttl=300)
-def get_index_prices():
+def get_index_prices_and_changes():
     prices = {}
+    changes = {}
     for name, symbol in major_indices.items():
         try:
             ticker = yf.Ticker(symbol)
-            price = ticker.history(period="1d", interval="1m")['Close']
-            if not price.empty:
-                prices[name] = price.iloc[-1]
+            hist = ticker.history(period="2d", interval="1m")['Close']
+            if not hist.empty:
+                last_price = hist.iloc[-1]
+                daily = ticker.history(period="2d", interval="1d")['Close']
+                if len(daily) >= 2:
+                    prev_close = daily.iloc[-2]
+                else:
+                    prev_close = None
+                prices[name] = last_price
+                if prev_close and prev_close != 0:
+                    change = ((last_price - prev_close) / prev_close) * 100
+                    changes[name] = change
+                else:
+                    changes[name] = None
             else:
-                prices[name] = 'N/A'
+                prices[name] = None
+                changes[name] = None
         except Exception:
-            prices[name] = 'N/A'
-    return prices
+            prices[name] = None
+            changes[name] = None
+    return prices, changes
 
-index_prices = get_index_prices()
+index_prices, index_changes = get_index_prices_and_changes()
 
-bar_items = []
-for name, price in index_prices.items():
-    bar_items.append(f"<span style='margin-right:32px;'><b>{name}:</b> <span style='color:#FFD700;'>{price if price != 'N/A' else 'N/A'}</span></span>")
-bar_html = "".join(bar_items)
-
-st.markdown(f"""
-<div style='width:100vw;overflow:hidden;background:linear-gradient(90deg,#222,#444 60%,#222);padding:10px 0 10px 0;margin-bottom:20px;border-bottom:3px solid #FFD700;'>
-  <marquee style='font-family:monospace;font-size:1.2em;color:#00FF41;' scrollamount='8'>{bar_html}</marquee>
-</div>
+st.markdown("""
+<style>
+.index-card {
+    background: linear-gradient(90deg, #232526 0%, #414345 100%);
+    border-radius: 10px;
+    padding: 12px 0 8px 0;
+    margin-bottom: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+}
+</style>
 """, unsafe_allow_html=True)
+
+cols = st.columns(len(major_indices))
+for i, name in enumerate(major_indices):
+    price = index_prices.get(name)
+    change = index_changes.get(name)
+    price_str = f"{price:,.2f}" if price is not None else "N/A"
+    if change is not None:
+        color = "#00FF41" if change >= 0 else "#FF4136"
+        sign = "+" if change >= 0 else ""
+        change_str = f"<span style='color:{color}; font-weight:bold;'>{sign}{change:.2f}%</span>"
+    else:
+        change_str = "<span style='color:gray;'>N/A</span>"
+    cols[i].markdown(
+        f"<div class='index-card' style='text-align:center; font-size:1.1em;'>"
+        f"<b>{name}</b><br>"
+        f"<span style='color:#FFD700; font-size:1.3em;'>{price_str}</span><br>"
+        f"{change_str}</div>",
+        unsafe_allow_html=True
+    )
 
 # Ticker list
 tickers = [
@@ -67,8 +139,6 @@ else: # Monday, Tuesday, Wednesday, Thursday
     days_to_subtract = today.weekday() + 3
 target_friday_date = today - datetime.timedelta(days=days_to_subtract)
 target_friday_ts = pd.Timestamp(target_friday_date)
-
-st.caption(f"Data for week ending on Friday: {target_friday_ts.strftime('%Y-%m-%d')}")
 
 # Define data fetching period
 start_download_date = target_friday_ts - pd.Timedelta(days=15)
@@ -128,83 +198,71 @@ if prev_trading_day is not None:
 else:
     df_display['% Change'] = float('nan')
 
-# Get Market Cap and Pre-market Data
-market_caps_dict = {}
-premarket_price_dict = {}
-premarket_change_dict = {}
-pe_ratio_dict = {}
-last_price_dict = {}
-last_price_change_dict = {}
-
-us_eastern = pytz.timezone('US/Eastern')
-now_utc = datetime.datetime.now(datetime.timezone.utc)
-now_est = now_utc.astimezone(us_eastern)
-
-for ticker_symbol in df_display['Ticker']:
+def fetch_ticker_data(ticker_symbol, friday_close):
     try:
         ticker_obj = yf.Ticker(ticker_symbol)
         info = ticker_obj.fast_info
-        market_caps_dict[ticker_symbol] = info.get('marketCap', float('nan'))
-        # Last price using 1-minute bar
-        try:
-            hist = ticker_obj.history(period="1d", interval="1m")
-            if not hist.empty:
-                last_price = hist['Close'].iloc[-1]
-            else:
-                last_price = None
-        except Exception:
-            last_price = None
-        last_price_dict[ticker_symbol] = last_price
+        # Last price
+        hist = ticker_obj.history(period="1d", interval="1m")
+        last_price = hist['Close'].iloc[-1] if not hist.empty else None
         # Last price % change from last Friday close
-        friday_close = df_display.loc[ticker_symbol, f'Close ({last_trading_day.strftime("%Y-%m-%d")})'] if f'Close ({last_trading_day.strftime("%Y-%m-%d")})' in df_display.columns else None
         if pd.notnull(last_price) and pd.notnull(friday_close) and friday_close != 0:
             last_price_change = ((last_price - friday_close) / friday_close) * 100
         else:
             last_price_change = None
-        last_price_change_dict[ticker_symbol] = last_price_change
-        # Get pre-market price using 1m interval
-        hist = ticker_obj.history(period="1d", interval="1m", prepost=True)
-        if not hist.empty:
-            last_row = hist.iloc[-1]
-            last_time = last_row.name.tz_convert(us_eastern) if last_row.name.tzinfo else us_eastern.localize(last_row.name)
-            # Only show pre-market price if before 09:30 US/Eastern
-            if last_time.hour < 9 or (last_time.hour == 9 and last_time.minute < 30):
-                premarket_price = last_row['Close']
-                premarket_price_dict[ticker_symbol] = premarket_price
-                close_price = df_display.loc[ticker_symbol, f'Close ({last_trading_day.strftime("%Y-%m-%d")})']
-                if pd.notnull(premarket_price) and pd.notnull(close_price) and close_price != 0:
-                    premarket_change = ((premarket_price - close_price) / close_price) * 100
-                else:
-                    premarket_change = np.nan
-                premarket_change_dict[ticker_symbol] = premarket_change
-            else:
-                premarket_price_dict[ticker_symbol] = np.nan
-                premarket_change_dict[ticker_symbol] = np.nan
+        # Pre-market price
+        pre_hist = ticker_obj.history(period="1d", interval="1m", prepost=True)
+        premarket_price = pre_hist['Close'].iloc[-1] if not pre_hist.empty else None
+        # Pre-market % change
+        if pd.notnull(premarket_price) and pd.notnull(friday_close) and friday_close != 0:
+            premarket_change = ((premarket_price - friday_close) / friday_close) * 100
         else:
-            premarket_price_dict[ticker_symbol] = np.nan
-            premarket_change_dict[ticker_symbol] = np.nan
-        # P/E ratio
+            premarket_change = None
+        # Market cap, P/E
+        market_cap = info.get('marketCap', None)
         pe = info.get('pe_ratio', None)
         if pe is None:
             try:
                 pe = ticker_obj.info.get('trailingPE', None)
             except Exception:
                 pe = None
-        pe_ratio_dict[ticker_symbol] = pe if pe is not None else None
+        return {
+            "Ticker": ticker_symbol,
+            "Last Price": last_price,
+            "Last Price % Change": last_price_change,
+            "Pre-market Price": premarket_price,
+            "Pre-market % Change": premarket_change,
+            "Market Cap": market_cap,
+            "P/E Ratio": pe,
+        }
     except Exception:
-        market_caps_dict[ticker_symbol] = float('nan')
-        premarket_price_dict[ticker_symbol] = np.nan
-        premarket_change_dict[ticker_symbol] = np.nan
-        last_price_dict[ticker_symbol] = None
-        last_price_change_dict[ticker_symbol] = None
-        pe_ratio_dict[ticker_symbol] = None
+        return {
+            "Ticker": ticker_symbol,
+            "Last Price": None,
+            "Last Price % Change": None,
+            "Pre-market Price": None,
+            "Pre-market % Change": None,
+            "Market Cap": None,
+            "P/E Ratio": None,
+        }
 
-df_display['Market Cap'] = df_display['Ticker'].map(market_caps_dict)
-df_display['Pre-market Price'] = df_display['Ticker'].map(premarket_price_dict)
-df_display['Pre-market % Change'] = df_display['Ticker'].map(premarket_change_dict)
-df_display['Last Price'] = df_display['Ticker'].map(last_price_dict)
-df_display['Last Price % Change'] = df_display['Ticker'].map(last_price_change_dict)
-df_display['P/E Ratio'] = df_display['Ticker'].map(pe_ratio_dict)
+# Get last Friday close prices for all tickers (from previous yf.download)
+friday_close_dict = {}
+for ticker in tickers:
+    try:
+        friday_close_dict[ticker] = last_day_closes[ticker]
+    except Exception:
+        friday_close_dict[ticker] = None
+
+with ThreadPoolExecutor(max_workers=8) as executor:
+    results = list(executor.map(lambda t: fetch_ticker_data(t, friday_close_dict.get(t)), df_display['Ticker']))
+
+# Build DataFrame from results
+parallel_df = pd.DataFrame(results).set_index('Ticker')
+
+# Merge with df_display to keep the same order and index
+for col in parallel_df.columns:
+    df_display[col] = parallel_df[col]
 
 # Adjust the columns for display: move 'Last Price' right after 'Ticker'
 cols = ['Ticker', 'Last Price', 'Last Price % Change', 'Pre-market Price', 'Pre-market % Change', 'Market Cap', 'P/E Ratio']
@@ -247,4 +305,7 @@ if feed.entries:
 else:
     st.info("No news found.")
 
-st.sidebar.button("Refresh Data", on_click=st.cache_data.clear, help="Click to refresh all data immediately.") 
+st.sidebar.button("Refresh Data", on_click=st.cache_data.clear, help="Click to refresh all data immediately.")
+
+def remove_week_caption():
+    pass  # This is just a placeholder to indicate removal 
