@@ -4,6 +4,9 @@ import pandas as pd
 import datetime
 import pytz
 import numpy as np
+import requests
+from bs4 import BeautifulSoup
+import feedparser
 
 st.set_page_config(page_title="Tradebox Stock Tracker", layout="wide")
 st.title("📈 Tradebox Stock Tracker")
@@ -87,6 +90,7 @@ else:
 market_caps_dict = {}
 premarket_price_dict = {}
 premarket_change_dict = {}
+pe_ratio_dict = {}
 
 us_eastern = pytz.timezone('US/Eastern')
 now_utc = datetime.datetime.now(datetime.timezone.utc)
@@ -118,17 +122,27 @@ for ticker_symbol in df_display['Ticker']:
         else:
             premarket_price_dict[ticker_symbol] = np.nan
             premarket_change_dict[ticker_symbol] = np.nan
+        # P/E ratio
+        pe = info.get('pe_ratio', None)
+        if pe is None:
+            try:
+                pe = ticker_obj.info.get('trailingPE', None)
+            except Exception:
+                pe = None
+        pe_ratio_dict[ticker_symbol] = pe if pe is not None else None
     except Exception:
         market_caps_dict[ticker_symbol] = float('nan')
         premarket_price_dict[ticker_symbol] = np.nan
         premarket_change_dict[ticker_symbol] = np.nan
+        pe_ratio_dict[ticker_symbol] = None
 
 df_display['Market Cap'] = df_display['Ticker'].map(market_caps_dict)
 df_display['Pre-market Price'] = df_display['Ticker'].map(premarket_price_dict)
 df_display['Pre-market % Change'] = df_display['Ticker'].map(premarket_change_dict)
+df_display['P/E Ratio'] = df_display['Ticker'].map(pe_ratio_dict)
 
 # Reorder and select columns for display
-cols = ['Ticker', f'Close ({last_trading_day.strftime("%Y-%m-%d")})', 'Prev Close', '% Change', 'Pre-market Price', 'Pre-market % Change', 'Market Cap']
+cols = ['Ticker', f'Close ({last_trading_day.strftime("%Y-%m-%d")})', 'Prev Close', '% Change', 'Pre-market Price', 'Pre-market % Change', 'Market Cap', 'P/E Ratio']
 df_display = df_display[cols]
 
 # Format for display with conditional coloring
@@ -144,7 +158,20 @@ styled = df_display.style.format({
     '% Change': '{:.2f}%',
     'Pre-market Price': '{:,.2f}',
     'Pre-market % Change': '{:.2f}%',
-    'Market Cap': lambda x: '{:,.0f}'.format(x) if pd.notnull(x) else 'N/A'
+    'Market Cap': lambda x: '{:,.0f}'.format(x) if pd.notnull(x) else 'N/A',
+    'P/E Ratio': lambda x: '{:.2f}'.format(x) if pd.notnull(x) and x != None else 'N/A'
 }).applymap(highlight_change, subset=['% Change', 'Pre-market % Change'])
 
-st.dataframe(styled, use_container_width=True) 
+st.dataframe(styled, use_container_width=True)
+
+st.markdown('---')
+st.header('📰 Latest Market News')
+
+feed_url = "https://news.google.com/rss/search?q=stock+market"
+feed = feedparser.parse(feed_url)
+
+if feed.entries:
+    for entry in feed.entries[:10]:
+        st.markdown(f"- [{entry.title}]({entry.link})")
+else:
+    st.info("No news found.") 
