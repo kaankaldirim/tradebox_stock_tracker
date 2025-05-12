@@ -7,6 +7,7 @@ import numpy as np
 import requests
 from bs4 import BeautifulSoup
 import feedparser
+import time
 
 st.set_page_config(page_title="Tradebox Stock Tracker", layout="wide")
 st.title("📈 Tradebox Stock Tracker")
@@ -33,6 +34,10 @@ st.caption(f"Data for week ending on Friday: {target_friday_ts.strftime('%Y-%m-%
 # Define data fetching period
 start_download_date = target_friday_ts - pd.Timedelta(days=15)
 end_download_date = target_friday_ts + pd.Timedelta(days=1)
+
+# Show last refresh time
+now = time.strftime('%Y-%m-%d %H:%M:%S')
+st.caption(f"Last data refresh: {now}")
 
 # Download historical data
 try:
@@ -80,10 +85,8 @@ df_display[f'Close ({last_trading_day.strftime("%Y-%m-%d")})'] = last_day_closes
 
 if prev_trading_day is not None:
     prev_day_closes = close_prices_hist.loc[prev_trading_day]
-    df_display['Prev Close'] = prev_day_closes.reindex(df_display.index)
-    df_display['% Change'] = ((df_display[f'Close ({last_trading_day.strftime("%Y-%m-%d")})'] - df_display['Prev Close']) / df_display['Prev Close']) * 100
+    df_display['% Change'] = ((df_display[f'Close ({last_trading_day.strftime("%Y-%m-%d")})'] - prev_day_closes) / prev_day_closes) * 100
 else:
-    df_display['Prev Close'] = float('nan')
     df_display['% Change'] = float('nan')
 
 # Get Market Cap and Pre-market Data
@@ -91,6 +94,8 @@ market_caps_dict = {}
 premarket_price_dict = {}
 premarket_change_dict = {}
 pe_ratio_dict = {}
+last_price_dict = {}
+last_price_change_dict = {}
 
 us_eastern = pytz.timezone('US/Eastern')
 now_utc = datetime.datetime.now(datetime.timezone.utc)
@@ -101,6 +106,23 @@ for ticker_symbol in df_display['Ticker']:
         ticker_obj = yf.Ticker(ticker_symbol)
         info = ticker_obj.fast_info
         market_caps_dict[ticker_symbol] = info.get('marketCap', float('nan'))
+        # Last price using 1-minute bar
+        try:
+            hist = ticker_obj.history(period="1d", interval="1m")
+            if not hist.empty:
+                last_price = hist['Close'].iloc[-1]
+            else:
+                last_price = None
+        except Exception:
+            last_price = None
+        last_price_dict[ticker_symbol] = last_price
+        # Last price % change from last Friday close
+        friday_close = df_display.loc[ticker_symbol, f'Close ({last_trading_day.strftime("%Y-%m-%d")})'] if f'Close ({last_trading_day.strftime("%Y-%m-%d")})' in df_display.columns else None
+        if pd.notnull(last_price) and pd.notnull(friday_close) and friday_close != 0:
+            last_price_change = ((last_price - friday_close) / friday_close) * 100
+        else:
+            last_price_change = None
+        last_price_change_dict[ticker_symbol] = last_price_change
         # Get pre-market price using 1m interval
         hist = ticker_obj.history(period="1d", interval="1m", prepost=True)
         if not hist.empty:
@@ -134,16 +156,27 @@ for ticker_symbol in df_display['Ticker']:
         market_caps_dict[ticker_symbol] = float('nan')
         premarket_price_dict[ticker_symbol] = np.nan
         premarket_change_dict[ticker_symbol] = np.nan
+        last_price_dict[ticker_symbol] = None
+        last_price_change_dict[ticker_symbol] = None
         pe_ratio_dict[ticker_symbol] = None
 
 df_display['Market Cap'] = df_display['Ticker'].map(market_caps_dict)
 df_display['Pre-market Price'] = df_display['Ticker'].map(premarket_price_dict)
 df_display['Pre-market % Change'] = df_display['Ticker'].map(premarket_change_dict)
+df_display['Last Price'] = df_display['Ticker'].map(last_price_dict)
+df_display['Last Price % Change'] = df_display['Ticker'].map(last_price_change_dict)
 df_display['P/E Ratio'] = df_display['Ticker'].map(pe_ratio_dict)
 
-# Reorder and select columns for display
-cols = ['Ticker', f'Close ({last_trading_day.strftime("%Y-%m-%d")})', 'Prev Close', '% Change', 'Pre-market Price', 'Pre-market % Change', 'Market Cap', 'P/E Ratio']
+# Adjust the columns for display: move 'Last Price' right after 'Ticker'
+cols = ['Ticker', 'Last Price', 'Last Price % Change', '% Change', 'Pre-market Price', 'Pre-market % Change', 'Market Cap', 'P/E Ratio']
 df_display = df_display[cols]
+
+# Ensure all None values are replaced with np.nan for Arrow compatibility
+for col in df_display.columns:
+    df_display[col] = df_display[col].replace({None: np.nan})
+    # Also, if column is object type, try to convert to numeric (ignore errors)
+    if df_display[col].dtype == object:
+        df_display[col] = pd.to_numeric(df_display[col], errors='ignore')
 
 # Format for display with conditional coloring
 def highlight_change(val):
@@ -153,14 +186,14 @@ def highlight_change(val):
     return f'color: {color};'
 
 styled = df_display.style.format({
-    f'Close ({last_trading_day.strftime("%Y-%m-%d")})': '{:,.2f}',
-    'Prev Close': '{:,.2f}',
-    '% Change': '{:.2f}%',
-    'Pre-market Price': '{:,.2f}',
-    'Pre-market % Change': '{:.2f}%',
-    'Market Cap': lambda x: '{:,.0f}'.format(x) if pd.notnull(x) else 'N/A',
-    'P/E Ratio': lambda x: '{:.2f}'.format(x) if pd.notnull(x) and x != None else 'N/A'
-}).applymap(highlight_change, subset=['% Change', 'Pre-market % Change'])
+    '% Change': lambda x: f"{x:.2f}%" if pd.notnull(x) else "N/A",
+    'Pre-market Price': lambda x: f"{x:,.2f}" if pd.notnull(x) else "N/A",
+    'Pre-market % Change': lambda x: f"{x:.2f}%" if pd.notnull(x) else "N/A",
+    'Last Price': lambda x: f"{x:,.2f}" if pd.notnull(x) else "N/A",
+    'Last Price % Change': lambda x: f"{x:.2f}%" if pd.notnull(x) else "N/A",
+    'Market Cap': lambda x: f"{x:,.0f}" if pd.notnull(x) else "N/A",
+    'P/E Ratio': lambda x: f"{x:.2f}" if pd.notnull(x) else "N/A"
+}).map(highlight_change, subset=['% Change', 'Pre-market % Change', 'Last Price % Change'])
 
 st.dataframe(styled, use_container_width=True)
 
