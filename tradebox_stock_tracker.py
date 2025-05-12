@@ -174,4 +174,6 @@ if feed.entries:
     for entry in feed.entries[:10]:
         st.markdown(f"- [{entry.title}]({entry.link})")
 else:
-    st.info("No news found.") 
+    st.info("No news found.")
+
+st.sidebar.button("Refresh Data", on_click=st.cache_data.clear, help="Click to refresh all data immediately.") 
