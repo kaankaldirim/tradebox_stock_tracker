@@ -2,6 +2,8 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import datetime
+import pytz
+import numpy as np
 
 st.set_page_config(page_title="Tradebox Stock Tracker", layout="wide")
 st.title("📈 Tradebox Stock Tracker")
@@ -81,28 +83,68 @@ else:
     df_display['Prev Close'] = float('nan')
     df_display['% Change'] = float('nan')
 
-# Get Market Cap
+# Get Market Cap and Pre-market Data
 market_caps_dict = {}
+premarket_price_dict = {}
+premarket_change_dict = {}
+
+us_eastern = pytz.timezone('US/Eastern')
+now_utc = datetime.datetime.now(datetime.timezone.utc)
+now_est = now_utc.astimezone(us_eastern)
+
 for ticker_symbol in df_display['Ticker']:
     try:
         ticker_obj = yf.Ticker(ticker_symbol)
         info = ticker_obj.fast_info
         market_caps_dict[ticker_symbol] = info.get('marketCap', float('nan'))
+        # Get pre-market price using 1m interval
+        hist = ticker_obj.history(period="1d", interval="1m", prepost=True)
+        if not hist.empty:
+            last_row = hist.iloc[-1]
+            last_time = last_row.name.tz_convert(us_eastern) if last_row.name.tzinfo else us_eastern.localize(last_row.name)
+            # Only show pre-market price if before 09:30 US/Eastern
+            if last_time.hour < 9 or (last_time.hour == 9 and last_time.minute < 30):
+                premarket_price = last_row['Close']
+                premarket_price_dict[ticker_symbol] = premarket_price
+                close_price = df_display.loc[ticker_symbol, f'Close ({last_trading_day.strftime("%Y-%m-%d")})']
+                if pd.notnull(premarket_price) and pd.notnull(close_price) and close_price != 0:
+                    premarket_change = ((premarket_price - close_price) / close_price) * 100
+                else:
+                    premarket_change = np.nan
+                premarket_change_dict[ticker_symbol] = premarket_change
+            else:
+                premarket_price_dict[ticker_symbol] = np.nan
+                premarket_change_dict[ticker_symbol] = np.nan
+        else:
+            premarket_price_dict[ticker_symbol] = np.nan
+            premarket_change_dict[ticker_symbol] = np.nan
     except Exception:
         market_caps_dict[ticker_symbol] = float('nan')
+        premarket_price_dict[ticker_symbol] = np.nan
+        premarket_change_dict[ticker_symbol] = np.nan
 
 df_display['Market Cap'] = df_display['Ticker'].map(market_caps_dict)
+df_display['Pre-market Price'] = df_display['Ticker'].map(premarket_price_dict)
+df_display['Pre-market % Change'] = df_display['Ticker'].map(premarket_change_dict)
 
 # Reorder and select columns for display
-df_display = df_display[['Ticker', f'Close ({last_trading_day.strftime("%Y-%m-%d")})', 'Prev Close', '% Change', 'Market Cap']]
+cols = ['Ticker', f'Close ({last_trading_day.strftime("%Y-%m-%d")})', 'Prev Close', '% Change', 'Pre-market Price', 'Pre-market % Change', 'Market Cap']
+df_display = df_display[cols]
 
-# Format for display
-st.dataframe(
-    df_display.style.format({
-        f'Close ({last_trading_day.strftime("%Y-%m-%d")})': '{:,.2f}',
-        'Prev Close': '{:,.2f}',
-        '% Change': '{:.2f}%',
-        'Market Cap': lambda x: '{:,.0f}'.format(x) if pd.notnull(x) else 'N/A' # Handle NaN for market cap
-    }),
-    use_container_width=True
-) 
+# Format for display with conditional coloring
+def highlight_change(val):
+    if pd.isnull(val):
+        return ''
+    color = 'red' if val < 0 else 'green'
+    return f'color: {color};'
+
+styled = df_display.style.format({
+    f'Close ({last_trading_day.strftime("%Y-%m-%d")})': '{:,.2f}',
+    'Prev Close': '{:,.2f}',
+    '% Change': '{:.2f}%',
+    'Pre-market Price': '{:,.2f}',
+    'Pre-market % Change': '{:.2f}%',
+    'Market Cap': lambda x: '{:,.0f}'.format(x) if pd.notnull(x) else 'N/A'
+}).applymap(highlight_change, subset=['% Change', 'Pre-market % Change'])
+
+st.dataframe(styled, use_container_width=True) 
