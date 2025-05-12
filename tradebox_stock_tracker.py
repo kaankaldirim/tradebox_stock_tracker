@@ -12,6 +12,45 @@ import time
 st.set_page_config(page_title="Tradebox Stock Tracker", layout="wide")
 st.title("📈 Tradebox Stock Tracker")
 
+# --- RETRO STOCK MARKET BAR ---
+import yfinance as yf
+
+major_indices = {
+    'NASDAQ 100': '^NDX',
+    'S&P 500': '^GSPC',
+    'Dow Jones': '^DJI',
+    'Russell 2000': '^RUT',
+    'VIX': '^VIX',
+}
+
+@st.cache_data(ttl=300)
+def get_index_prices():
+    prices = {}
+    for name, symbol in major_indices.items():
+        try:
+            ticker = yf.Ticker(symbol)
+            price = ticker.history(period="1d", interval="1m")['Close']
+            if not price.empty:
+                prices[name] = price.iloc[-1]
+            else:
+                prices[name] = 'N/A'
+        except Exception:
+            prices[name] = 'N/A'
+    return prices
+
+index_prices = get_index_prices()
+
+bar_items = []
+for name, price in index_prices.items():
+    bar_items.append(f"<span style='margin-right:32px;'><b>{name}:</b> <span style='color:#FFD700;'>{price if price != 'N/A' else 'N/A'}</span></span>")
+bar_html = "".join(bar_items)
+
+st.markdown(f"""
+<div style='width:100vw;overflow:hidden;background:linear-gradient(90deg,#222,#444 60%,#222);padding:10px 0 10px 0;margin-bottom:20px;border-bottom:3px solid #FFD700;'>
+  <marquee style='font-family:monospace;font-size:1.2em;color:#00FF41;' scrollamount='8'>{bar_html}</marquee>
+</div>
+""", unsafe_allow_html=True)
+
 # Ticker list
 tickers = [
     'COIN','MSTR','MU','NEE','QCOM','MSFT','BSX','LMT','RTX','C','PLTR','IONQ','RGTI','CEG','LLY',
@@ -168,7 +207,7 @@ df_display['Last Price % Change'] = df_display['Ticker'].map(last_price_change_d
 df_display['P/E Ratio'] = df_display['Ticker'].map(pe_ratio_dict)
 
 # Adjust the columns for display: move 'Last Price' right after 'Ticker'
-cols = ['Ticker', 'Last Price', 'Last Price % Change', '% Change', 'Pre-market Price', 'Pre-market % Change', 'Market Cap', 'P/E Ratio']
+cols = ['Ticker', 'Last Price', 'Last Price % Change', 'Pre-market Price', 'Pre-market % Change', 'Market Cap', 'P/E Ratio']
 df_display = df_display[cols]
 
 # Ensure all None values are replaced with np.nan for Arrow compatibility
@@ -186,14 +225,13 @@ def highlight_change(val):
     return f'color: {color};'
 
 styled = df_display.style.format({
-    '% Change': lambda x: f"{x:.2f}%" if pd.notnull(x) else "N/A",
     'Pre-market Price': lambda x: f"{x:,.2f}" if pd.notnull(x) else "N/A",
     'Pre-market % Change': lambda x: f"{x:.2f}%" if pd.notnull(x) else "N/A",
     'Last Price': lambda x: f"{x:,.2f}" if pd.notnull(x) else "N/A",
     'Last Price % Change': lambda x: f"{x:.2f}%" if pd.notnull(x) else "N/A",
     'Market Cap': lambda x: f"{x:,.0f}" if pd.notnull(x) else "N/A",
     'P/E Ratio': lambda x: f"{x:.2f}" if pd.notnull(x) else "N/A"
-}).map(highlight_change, subset=['% Change', 'Pre-market % Change', 'Last Price % Change'])
+}).map(highlight_change, subset=['Pre-market % Change', 'Last Price % Change'])
 
 st.dataframe(styled, use_container_width=True)
 
