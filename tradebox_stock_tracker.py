@@ -111,17 +111,26 @@ def get_index_prices_and_changes():
 
 index_prices, index_changes = get_index_prices_and_changes()
 
+# Place the Refresh Data button at the top of the main screen (not in the sidebar)
+if st.button("Refresh Data", help="Click to refresh all data immediately."):
+    st.cache_data.clear()
+
 # --- Modern white header (no emoji, no yellow, no image) ---
 st.markdown("""
 <style>
 .header-title-modern {
     font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
     font-size: 2.7em;
-    color: #fff;
+    color: #222;
     letter-spacing: 1.5px;
     text-align: center;
     font-weight: 700;
     margin-bottom: 0.1em;
+}
+@media (prefers-color-scheme: dark) {
+    .header-title-modern {
+        color: #fff;
+    }
 }
 .header-underline-modern {
     width: 60%;
@@ -388,8 +397,6 @@ if feed.entries:
         st.markdown(f"- [{entry.title}]({entry.link})")
 else:
     st.info("No news found.")
-
-st.sidebar.button("Refresh Data", on_click=st.cache_data.clear, help="Click to refresh all data immediately.")
 
 def remove_week_caption():
     pass  # This is just a placeholder to indicate removal 
