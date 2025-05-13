@@ -205,11 +205,6 @@ if st.button("Refresh Data", help="Click to refresh all data immediately."):
     st.cache_data.clear()
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Add GOLD (XAUUSD=X) to the major_indices and index bar
-define_gold = False
-if 'GOLD' not in major_indices:
-    major_indices['GOLD'] = 'XAUUSD=X'
-
 # --- Modern index bar as cards (horizontal scrollable) ---
 from datetime import datetime
 
