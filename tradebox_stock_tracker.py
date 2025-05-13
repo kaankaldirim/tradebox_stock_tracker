@@ -10,27 +10,50 @@ import feedparser
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
+import asyncio
+import aiohttp
+import nest_asyncio
 
 st.set_page_config(page_title="Tradebox Stock Tracker", layout="wide")
 
-@st.cache_data(ttl=300)
-def get_google_close_price_and_name(ticker):
-    # Try NASDAQ first, then NYSE if not found
+# Ticker list (move this up before async scraping)
+tickers = [
+    'COIN','MSTR','MU','NEE','QCOM','MSFT','BSX','LMT','RTX','C','PLTR','IONQ','RGTI','CEG','LLY',
+    'QQQ','DELL','TLT','NVO','RIOT','GOOGL','NVDA','AMZN','TSLA','MRVL','AA','AAL','AMD','FCX',
+    'ONON'  # Added ONON
+]
+
+nest_asyncio.apply()
+
+async def fetch_google_data(session, ticker):
     for suffix in [':NASDAQ', ':NYSE']:
         url = f"https://www.google.com/finance/quote/{ticker}{suffix}"
         headers = {"User-Agent": "Mozilla/5.0"}
         try:
-            r = requests.get(url, headers=headers, timeout=5)
-            soup = BeautifulSoup(r.text, "html.parser")
-            price = soup.find("div", class_="YMlKec fxKbKc")
-            name = soup.find("div", class_="zzDege")
-            close_val = float(price.text.replace(",", "").replace("$", "")) if price else None
-            company_name = name.text.strip() if name else ''
-            if close_val:
-                return close_val, company_name
+            async with session.get(url, headers=headers, timeout=5) as r:
+                text = await r.text()
+                soup = BeautifulSoup(text, "html.parser")
+                price = soup.find("div", class_="YMlKec fxKbKc")
+                name = soup.find("div", class_="zzDege")
+                close_val = float(price.text.replace(",", "").replace("$", "")) if price else None
+                company_name = name.text.strip() if name else ''
+                if close_val:
+                    return ticker, close_val, company_name
         except Exception:
             continue
-    return None, ''
+    return ticker, None, ''
+
+async def fetch_all_google_data(tickers):
+    async with aiohttp.ClientSession() as session:
+        tasks = [fetch_google_data(session, ticker) for ticker in tickers]
+        results = await asyncio.gather(*tasks)
+    return results
+
+# Fetch all company names and close prices in parallel
+loop = asyncio.get_event_loop()
+google_results = loop.run_until_complete(fetch_all_google_data(tickers))
+last_official_close_dict = {t: c for t, c, n in google_results}
+company_names = {t: n for t, c, n in google_results}
 
 # --- MODERN INDEX CARDS ---
 import yfinance as yf
@@ -183,13 +206,6 @@ st.markdown(f"""
 <div class="index-bar-cards">{bar_cards_html}</div>
 """, unsafe_allow_html=True)
 
-# Ticker list
-tickers = [
-    'COIN','MSTR','MU','NEE','QCOM','MSFT','BSX','LMT','RTX','C','PLTR','IONQ','RGTI','CEG','LLY',
-    'QQQ','DELL','TLT','NVO','RIOT','GOOGL','NVDA','AMZN','TSLA','MRVL','AA','AAL','AMD','FCX',
-    'ONON'  # Added ONON
-]
-
 # Calculate the target "last Friday" date
 today = date.today()
 if today.weekday() >= 4: # Friday, Saturday, Sunday
@@ -245,11 +261,7 @@ last_trading_day = dates_before_today[-1]
 last_day_closes = close_prices_hist.loc[last_trading_day]
 df_display = pd.DataFrame(index=last_day_closes.index)
 df_display['Ticker'] = df_display.index
-# Add company name column
-company_names = {}
-for ticker in tickers:
-    close_price, company_name = get_google_close_price_and_name(ticker)
-    company_names[ticker] = company_name
+# Add company name column using async results
 df_display['Company Name'] = df_display['Ticker'].map(company_names)
 df_display[f'Close ({last_trading_day.strftime("%Y-%m-%d")})'] = last_day_closes
 
@@ -265,13 +277,6 @@ if prev_trading_day is not None:
     df_display['% Change'] = ((df_display[f'Close ({last_trading_day.strftime("%Y-%m-%d")})'] - prev_day_closes) / prev_day_closes) * 100
 else:
     df_display['% Change'] = float('nan')
-
-# Get Google Finance close prices and company names for all tickers
-last_official_close_dict = {}
-for ticker in tickers:
-    close_price, company_name = get_google_close_price_and_name(ticker)
-    last_official_close_dict[ticker] = close_price
-    company_names[ticker] = company_name
 
 # --- Modify fetch_ticker_data to use last_official_close for pre-market % change ---
 def fetch_ticker_data(ticker_symbol, last_official_close):
