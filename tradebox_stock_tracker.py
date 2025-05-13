@@ -111,10 +111,6 @@ def get_index_prices_and_changes():
 
 index_prices, index_changes = get_index_prices_and_changes()
 
-# Place the Refresh Data button at the top of the main screen (not in the sidebar)
-if st.button("Refresh Data", help="Click to refresh all data immediately."):
-    st.cache_data.clear()
-
 # --- Modern white header (no emoji, no yellow, no image) ---
 st.markdown("""
 <style>
@@ -123,18 +119,75 @@ st.markdown("""
     font-size: 2.7em;
     color: #222;
     letter-spacing: 1.5px;
-    text-align: center;
+    text-align: left;
     font-weight: 700;
     margin-bottom: 0.1em;
+    margin-left: 10px;
 }
 @media (prefers-color-scheme: dark) {
+    .header-title-modern { color: #fff; }
+}
+@media (max-width: 600px) {
     .header-title-modern {
-        color: #fff;
+        font-size: 1.3em;
+        margin-top: 0.5em;
+        margin-left: 4px;
+    }
+    .index-bar-cards {
+        gap: 8px !important;
+        padding: 4px 0 8px 0 !important;
+    }
+    .index-card {
+        min-width: 120px !important;
+        padding: 8px 8px !important;
+    }
+    .header-underline-modern {
+        width: 90% !important;
+    }
+}
+.index-bar-cards {
+    display: flex;
+    gap: 16px;
+    overflow-x: auto;
+    padding: 8px 0 12px 0;
+    margin-bottom: 18px;
+    scrollbar-color: #888 #222;
+    scrollbar-width: thin;
+}
+.index-card {
+    min-width: 150px;
+    background: #23272f;
+    border-radius: 10px;
+    color: white;
+    padding: 12px 18px;
+    box-shadow: 0 2px 8px #0002;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
+}
+.index-card.green { background: #1e7e34; }
+.index-card.red { background: #c82333; }
+.index-card.gray { background: #444; }
+.index-title { font-weight: bold; font-size: 1.1em; letter-spacing: 0.5px; }
+.index-price { font-size: 1.3em; margin: 4px 0; }
+.index-change { font-size: 1em; }
+.index-time { font-size: 0.85em; color: #ccc; margin-top: 4px; }
+div[data-testid="stDataFrame"] > div {
+    overflow-x: auto !important;
+}
+@media (max-width: 600px) {
+    .index-title, .index-price, .index-change, .index-time {
+        font-size: 0.95em !important;
+    }
+    .index-card {
+        min-width: 110px !important;
+        padding: 6px 6px !important;
     }
 }
 .header-underline-modern {
     width: 60%;
-    margin: 0 auto 18px auto;
+    margin: 0 0 18px 10px;
     border: 0;
     border-top: 3px solid #444;
     opacity: 0.7;
@@ -145,6 +198,17 @@ st.markdown("""
 </div>
 <hr class="header-underline-modern">
 """, unsafe_allow_html=True)
+
+# Only one centered Refresh Data button above the index cards
+st.markdown('<div style="display:flex;justify-content:center;margin-bottom:10px;">', unsafe_allow_html=True)
+if st.button("Refresh Data", help="Click to refresh all data immediately."):
+    st.cache_data.clear()
+st.markdown('</div>', unsafe_allow_html=True)
+
+# Add GOLD (XAUUSD=X) to the major_indices and index bar
+define_gold = False
+if 'GOLD' not in major_indices:
+    major_indices['GOLD'] = 'XAUUSD=X'
 
 # --- Modern index bar as cards (horizontal scrollable) ---
 from datetime import datetime
