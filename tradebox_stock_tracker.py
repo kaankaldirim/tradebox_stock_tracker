@@ -13,12 +13,15 @@ from datetime import date, timedelta
 import asyncio
 import aiohttp
 import nest_asyncio
+import base64
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
+import urllib.parse
 
 st.set_page_config(page_title="Tradebox Stock Tracker", layout="wide")
 
 # Ticker list (move this up before async scraping)
 tickers = [
-    'COIN','MSTR','MU','NEE','QCOM','MSFT','BSX','LMT','RTX','C','PLTR','IONQ','RGTI','CEG','LLY',
+    'COIN','MSTR','MU','NEE','QCOM','MSFT','WMT','LMT','NFLX','C','PLTR','IONQ','RGTI','CEG','LLY',
     'QQQ','DELL','TLT','NVO','RIOT','GOOGL','NVDA','AMZN','TSLA','MRVL','AA','AAL','AMD','FCX',
     'ONON'  # Added ONON
 ]
@@ -68,16 +71,7 @@ major_indices = {
     'Bitcoin': 'BTC-USD',
     'Ethereum': 'ETH-USD',
     'US10Y': '^TNX',
-}
 
-# Assign a unique color for each index label
-index_label_colors = {
-    'NASDAQ 100': '#1f77b4',  # blue
-    'S&P 500': '#ff7f0e',     # orange
-    'Dow Jones': '#2ca02c',   # green
-    'Russell 2000': '#d62728',# red
-    'VIX': '#9467bd',         # purple
-    'Bitcoin': '#f2b90c',     # gold
 }
 
 @st.cache_data(ttl=300)
@@ -111,7 +105,12 @@ def get_index_prices_and_changes():
 
 index_prices, index_changes = get_index_prices_and_changes()
 
-# --- Modern white header (no emoji, no yellow, no image) ---
+# Russell 2000 için fallback uygula
+if index_prices.get('Russell 2000') is None and index_prices.get('Russell 2000 ETF') is not None:
+    index_prices['Russell 2000'] = index_prices['Russell 2000 ETF']
+    index_changes['Russell 2000'] = index_changes['Russell 2000 ETF']
+
+# --- Theme uyumlu başlık ve alt çizgi ---
 st.markdown("""
 <style>
 .header-title-modern {
@@ -126,64 +125,6 @@ st.markdown("""
 }
 @media (prefers-color-scheme: dark) {
     .header-title-modern { color: #fff; }
-}
-@media (max-width: 600px) {
-    .header-title-modern {
-        font-size: 1.3em;
-        margin-top: 0.5em;
-        margin-left: 4px;
-    }
-    .index-bar-cards {
-        gap: 8px !important;
-        padding: 4px 0 8px 0 !important;
-    }
-    .index-card {
-        min-width: 120px !important;
-        padding: 8px 8px !important;
-    }
-    .header-underline-modern {
-        width: 90% !important;
-    }
-}
-.index-bar-cards {
-    display: flex;
-    gap: 16px;
-    overflow-x: auto;
-    padding: 8px 0 12px 0;
-    margin-bottom: 18px;
-    scrollbar-color: #888 #222;
-    scrollbar-width: thin;
-}
-.index-card {
-    min-width: 150px;
-    background: #23272f;
-    border-radius: 10px;
-    color: white;
-    padding: 12px 18px;
-    box-shadow: 0 2px 8px #0002;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
-}
-.index-card.green { background: #1e7e34; }
-.index-card.red { background: #c82333; }
-.index-card.gray { background: #444; }
-.index-title { font-weight: bold; font-size: 1.1em; letter-spacing: 0.5px; }
-.index-price { font-size: 1.3em; margin: 4px 0; }
-.index-change { font-size: 1em; }
-.index-time { font-size: 0.85em; color: #ccc; margin-top: 4px; }
-div[data-testid="stDataFrame"] > div {
-    overflow-x: auto !important;
-}
-@media (max-width: 600px) {
-    .index-title, .index-price, .index-change, .index-time {
-        font-size: 0.95em !important;
-    }
-    .index-card {
-        min-width: 110px !important;
-        padding: 6px 6px !important;
-    }
 }
 .header-underline-modern {
     width: 60%;
@@ -205,9 +146,7 @@ if st.button("Refresh Data", help="Click to refresh all data immediately."):
     st.cache_data.clear()
 st.markdown('</div>', unsafe_allow_html=True)
 
-# --- Modern index bar as cards (horizontal scrollable) ---
-from datetime import datetime
-
+# --- Endeks kutularına ok ve sparkline ekle ---
 def get_index_time(symbol):
     # Try to get the latest time for the index (using yfinance), show as GMT+3 (Istanbul)
     try:
@@ -222,21 +161,57 @@ def get_index_time(symbol):
         pass
     return "-"
 
+def get_sparkline_svg(prices, width=80, height=24, color="#fff"):
+    if prices is None or len(prices) < 2:
+        return ""
+    import numpy as np
+    prices = np.array(prices)
+    # Normalize to [0, height]
+    min_p, max_p = np.min(prices), np.max(prices)
+    if max_p - min_p == 0:
+        y = np.full_like(prices, height//2)
+    else:
+        y = height - ((prices - min_p) / (max_p - min_p) * (height-4) + 2)
+    x = np.linspace(2, width-2, len(prices))
+    points = " ".join(f"{int(xi)},{int(yi)}" for xi, yi in zip(x, y))
+    svg = f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" fill="none" xmlns="http://www.w3.org/2000/svg"><polyline points="{points}" fill="none" stroke="{color}" stroke-width="2"/></svg>'
+    return svg
+
 bar_card_items = []
 for name, symbol in major_indices.items():
     price = index_prices.get(name)
     change = index_changes.get(name)
+    # Ok işareti
+    if change is not None:
+        if change > 0:
+            arrow = '<span style="color:#6ee26e;font-size:1.1em;vertical-align:middle;">▲</span>'
+        elif change < 0:
+            arrow = '<span style="color:#ff5c5c;font-size:1.1em;vertical-align:middle;">▼</span>'
+        else:
+            arrow = ''
+    else:
+        arrow = ''
     price_str = f"{price:,.2f}" if price is not None else "N/A"
     time_str = get_index_time(symbol)
     if change is not None:
         color_class = "green" if change >= 0 else "red"
         sign = "+" if change >= 0 else ""
-        change_str = f"{sign}{change:.2f}%"
+        change_str = f"{arrow} {sign}{change:.2f}%"
     else:
         color_class = "gray"
         change_str = "N/A"
+    # Sparkline için fiyat verisi çek
+    try:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period="1d", interval="5m")['Close']
+        spark_prices = hist[-16:].tolist() if len(hist) >= 16 else hist.tolist()
+    except Exception:
+        spark_prices = []
+    spark_svg = get_sparkline_svg(spark_prices, color="#fff" if color_class=="gray" else ("#6ee26e" if color_class=="green" else "#ff5c5c"))
     bar_card_items.append(
-        f"<div class='index-card {color_class}'><div class='index-title'>{name}</div><div class='index-price'>{price_str}</div><div class='index-change'>{change_str}</div><div class='index-time'>{time_str}</div></div>"
+        f"<div class='index-card {color_class}'><div class='index-title'>{name}</div><div class='index-price'>{price_str}</div><div class='index-change'>{change_str}</div>"
+        f"<div style='margin:4px 0 0 0;'>{spark_svg}</div>"
+        f"<div class='index-time'>{time_str}</div></div>"
     )
 bar_cards_html = ''.join(bar_card_items)
 
@@ -427,24 +402,43 @@ for col in df_display.columns:
     except Exception:
         pass
 
-# Format for display with conditional coloring
-def highlight_change(val):
-    if pd.isnull(val):
-        return ''
-    color = 'red' if val < 0 else 'green'
-    return f'color: {color};'
+# --- Tablo formatlama ---
+def highlight_pnl(val):
+    try:
+        v = float(val)
+        if v > 0:
+            return 'background-color: #e6f4ea; color: #188038; font-weight: bold;'
+        elif v < 0:
+            return 'background-color: #fbeaea; color: #d93025; font-weight: bold;'
+    except:
+        pass
+    return ''
+
+def format_pe(x):
+    try:
+        return f"{float(x):.2f}"
+    except:
+        return x
 
 styled = df_display.style.format({
-    'Pre-market Price': lambda x: f"{x:,.2f}" if pd.notnull(x) else "N/A",
-    'Pre-market % Change': lambda x: f"{x:.2f}%" if pd.notnull(x) else "N/A",
-    'Last Price': lambda x: f"{x:,.2f}" if pd.notnull(x) else "N/A",
-    'Last Price % Change': lambda x: f"{x:.2f}%" if pd.notnull(x) else "N/A",
-    'Market Cap': lambda x: f"{x:,.0f}" if pd.notnull(x) else "N/A",
-    'P/E Ratio': lambda x: f"{x:.2f}" if pd.notnull(x) else "N/A"
-}).map(highlight_change, subset=['Pre-market % Change', 'Last Price % Change'])
+    'Pre-market Price': '{:,.2f}'.format,
+    'Last Price': '{:,.2f}'.format,
+    'Market Cap': '{:,.0f}'.format,
+    'P/E Ratio': format_pe,
+    'Last Price % Change': '{:+.2f}%'.format,
+    'Pre-market % Change': '{:+.2f}%'.format,
+    '% Change': '{:+.2f}%'.format,
+}).map(highlight_pnl, subset=[col for col in ['Last Price % Change', 'Pre-market % Change', '% Change'] if col in df_display.columns])
 
-st.dataframe(styled, use_container_width=True)
+st.markdown(styled.to_html(escape=False), unsafe_allow_html=True)
 
+# GOOGL ve Dow Jones veri kontrolü
+if 'GOOGL' in df_display.index and df_display.loc['GOOGL'].isnull().any():
+    st.warning("GOOGL verileri alınamadı.")
+if 'Dow Jones' in index_prices and index_prices.get('Dow Jones') is None:
+    st.warning("Dow Jones verisi alınamadı.")
+
+# --- Latest Market News ---
 st.markdown('---')
 st.header('📰 Latest Market News')
 
@@ -453,7 +447,23 @@ feed = feedparser.parse(feed_url)
 
 if feed.entries:
     for entry in feed.entries[:10]:
-        st.markdown(f"- [{entry.title}]({entry.link})")
+        title = entry.title
+        link = entry.link
+        summary = entry.summary if hasattr(entry, 'summary') else ''
+        summary_short = summary[:140] + '...' if len(summary) > 140 else summary
+        parsed_url = urllib.parse.urlparse(link)
+        domain = parsed_url.netloc.replace('www.', '')
+        favicon_url = f"https://www.google.com/s2/favicons?domain={domain}"
+        st.markdown(f"""
+        <div style='display:flex;align-items:flex-start;gap:12px;margin-bottom:18px;padding:12px 0;border-bottom:1px solid #eee;'>
+            <img src='{favicon_url}' style='width:24px;height:24px;margin-top:2px;border-radius:4px;' alt='icon'>
+            <div>
+                <a href='{link}' target='_blank' style='font-size:1.13em;font-weight:600;color:#0057b8;text-decoration:none;'>{title}</a>
+                <div style='font-size:0.98em;color:#444;margin:2px 0 0 0;'>{summary_short}</div>
+                <div style='font-size:0.93em;color:#888;margin-top:2px;'>{domain}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 else:
     st.info("No news found.")
 
@@ -470,3 +480,19 @@ def remove_week_caption():
 #     except Exception:
 #         return '', 0 
 # ... rest of code unchanged ... 
+
+def get_index_time(symbol):
+    # Try to get the latest time for the index (using yfinance), show as GMT+3 (Istanbul)
+    try:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period="1d", interval="1m")
+        if not hist.empty:
+            ts = hist.index[-1]
+            istanbul = pytz.timezone('Europe/Istanbul')
+            ts_ist = ts.tz_localize('UTC').astimezone(istanbul) if ts.tzinfo is None else ts.astimezone(istanbul)
+            return ts_ist.strftime('%H:%M')
+    except Exception:
+        pass
+    return "-" 
+
+# ... Latest Market News başlığı ve devamı ... 
