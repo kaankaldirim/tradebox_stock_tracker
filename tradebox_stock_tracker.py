@@ -403,13 +403,13 @@ for col in df_display.columns:
         pass
 
 # --- Tablo formatlama ---
-def highlight_pnl(val):
+def color_pnl(val):
     try:
         v = float(val)
         if v > 0:
-            return 'background-color: #e6f4ea; color: #188038; font-weight: bold;'
+            return 'color: #188038; font-weight: bold;'
         elif v < 0:
-            return 'background-color: #fbeaea; color: #d93025; font-weight: bold;'
+            return 'color: #d93025; font-weight: bold;'
     except:
         pass
     return ''
@@ -428,9 +428,9 @@ styled = df_display.style.format({
     'Last Price % Change': '{:+.2f}%'.format,
     'Pre-market % Change': '{:+.2f}%'.format,
     '% Change': '{:+.2f}%'.format,
-}).map(highlight_pnl, subset=[col for col in ['Last Price % Change', 'Pre-market % Change', '% Change'] if col in df_display.columns])
+}).applymap(color_pnl, subset=[col for col in ['Last Price % Change', 'Pre-market % Change', '% Change'] if col in df_display.columns])
 
-st.markdown(styled.to_html(escape=False), unsafe_allow_html=True)
+st.dataframe(styled, use_container_width=True)
 
 # GOOGL ve Dow Jones veri kontrolü
 if 'GOOGL' in df_display.index and df_display.loc['GOOGL'].isnull().any():
@@ -446,22 +446,33 @@ feed_url = "https://news.google.com/rss/search?q=stock+market"
 feed = feedparser.parse(feed_url)
 
 if feed.entries:
+    st.markdown("""
+    <style>
+    .news-card-minimal {background: rgba(255,255,255,0.01); border-radius: 7px; padding: 10px 0 10px 0; margin-bottom: 7px; border-bottom: 1px solid #eee;}
+    .news-title-minimal {font-size: 1.08em; font-weight: 700; color: #222; text-decoration: none; line-height: 1.3;}
+    .news-domain-row {display: flex; align-items: center; gap: 7px; margin-top: 2px;}
+    .news-domain-minimal {font-size: 0.97em; color: #888;}
+    .news-summary-minimal {font-size: 0.97em; color: #888; font-style: italic; margin-top: 2px;}
+    @media (prefers-color-scheme: dark) {
+      .news-card-minimal {background: rgba(30,32,36,0.01); border-bottom: 1px solid #333;}
+      .news-title-minimal {color: #fff;}
+    }
+    </style>
+    """, unsafe_allow_html=True)
     for entry in feed.entries[:10]:
         title = entry.title
         link = entry.link
         summary = entry.summary if hasattr(entry, 'summary') else ''
-        summary_short = summary[:140] + '...' if len(summary) > 140 else summary
+        summary_short = summary[:80] + '...' if len(summary) > 80 else summary
         parsed_url = urllib.parse.urlparse(link)
         domain = parsed_url.netloc.replace('www.', '')
-        favicon_url = f"https://www.google.com/s2/favicons?domain={domain}"
         st.markdown(f"""
-        <div style='display:flex;align-items:flex-start;gap:12px;margin-bottom:18px;padding:12px 0;border-bottom:1px solid #eee;'>
-            <img src='{favicon_url}' style='width:24px;height:24px;margin-top:2px;border-radius:4px;' alt='icon'>
-            <div>
-                <a href='{link}' target='_blank' style='font-size:1.13em;font-weight:600;color:#0057b8;text-decoration:none;'>{title}</a>
-                <div style='font-size:0.98em;color:#444;margin:2px 0 0 0;'>{summary_short}</div>
-                <div style='font-size:0.93em;color:#888;margin-top:2px;'>{domain}</div>
+        <div class='news-card-minimal'>
+            <a href='{link}' target='_blank' class='news-title-minimal'>{title}</a>
+            <div class='news-domain-row'>
+                <span class='news-domain-minimal'>{domain}</span>
             </div>
+            <div class='news-summary-minimal'>{summary_short}</div>
         </div>
         """, unsafe_allow_html=True)
 else:
