@@ -23,10 +23,6 @@ from functools import lru_cache
 import json
 from io import StringIO
 import calendar
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.options import Options
 
 # --- Market Movers veri çekme fonksiyonu ---
 @lru_cache(maxsize=3)
@@ -47,95 +43,7 @@ def get_yahoo_movers(mover_type):
     df = df.head(15)
     return df
 
-# --- Economic Calendar veri çekme fonksiyonu ---
-@st.cache_data(ttl=604800)
-def fetch_economic_calendar():
-    url = "https://tradingeconomics.com/calendar"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(url, headers=headers, timeout=10)
-    soup = BeautifulSoup(r.text, "html.parser")
-    table = soup.find('table', {'id': 'calendar'})
-    if not table:
-        return pd.DataFrame()
-    rows = table.find_all('tr')
-    events = []
-    for row in rows:
-        cols = row.find_all('td')
-        if len(cols) >= 7:
-            date = cols[0].text.strip()
-            time = cols[1].text.strip()
-            country = cols[2].text.strip()
-            event = cols[3].text.strip()
-            importance = cols[4].get('title', '').strip() if cols[4].get('title') else cols[4].text.strip()
-            actual = cols[5].text.strip()
-            forecast = cols[6].text.strip()
-            previous = cols[7].text.strip() if len(cols) > 7 else ''
-            if country in ['United States', 'Euro Area', 'Germany', 'United Kingdom', 'China', 'Japan']:
-                events.append({
-                    "Date": date,
-                    "Time": time,
-                    "Country": country,
-                    "Event": event,
-                    "Actual": actual,
-                    "Forecast": forecast,
-                    "Previous": previous,
-                    "Importance": importance
-                })
-    df = pd.DataFrame(events)
-    return df
-
-# --- Investing.com ekonomik takvim scraping fonksiyonu (Selenium ile) ---
-def fetch_investing_economic_calendar(year, month):
-    from bs4 import BeautifulSoup
-    import pandas as pd
-    from datetime import datetime
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    driver.get("https://www.investing.com/economic-calendar/")
-    driver.implicitly_wait(10)
-    html = driver.page_source
-    driver.quit()
-    soup = BeautifulSoup(html, "html.parser")
-    table = soup.find('table', {'id': 'economicCalendarData'})
-    if not table:
-        return pd.DataFrame()
-    events = []
-    for row in table.find_all('tr', {'class': 'js-event-item'}):
-        try:
-            ts = row.get('data-event-datetime')
-            if not ts:
-                continue
-            dt = datetime.fromtimestamp(int(ts))
-            if dt.year != year or dt.month != month:
-                continue
-            date = dt.strftime('%Y-%m-%d')
-            time = dt.strftime('%H:%M')
-            tds = row.find_all('td')
-            country = tds[1].find('span', {'title': True})['title'] if tds[1].find('span', {'title': True}) else ''
-            event = tds[2].get_text(strip=True)
-            imp_td = tds[3]
-            n_bulls = len(imp_td.find_all('i', {'class': 'grayFullBullishIcon'}))
-            importance = 'High' if n_bulls == 3 else 'Medium' if n_bulls == 2 else 'Low'
-            actual = tds[4].get_text(strip=True)
-            forecast = tds[5].get_text(strip=True)
-            previous = tds[6].get_text(strip=True)
-            events.append({
-                'Date': date,
-                'Time': time,
-                'Country': country,
-                'Event': event,
-                'Actual': actual,
-                'Forecast': forecast,
-                'Previous': previous,
-                'Importance': importance
-            })
-        except Exception:
-            continue
-    df = pd.DataFrame(events)
-    return df.reset_index(drop=True)
+# --- Economic Calendar ve Selenium fonksiyonları tamamen kaldırıldı ---
 
 st.set_page_config(page_title="Tradebox Stock Tracker", layout="wide")
 
