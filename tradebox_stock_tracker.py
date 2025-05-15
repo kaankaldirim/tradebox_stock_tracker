@@ -66,11 +66,9 @@ major_indices = {
     'S&P 500': '^GSPC',
     'Dow Jones': '^DJI',
     'Russell 2000': '^RUT',
-    'VIX': '^VIX',
     'Bitcoin': 'BTC-USD',
     'Ethereum': 'ETH-USD',
     'US10Y': '^TNX',
-
 }
 
 @st.cache_data(ttl=300)
@@ -214,39 +212,111 @@ for name, symbol in major_indices.items():
     )
 bar_cards_html = ''.join(bar_card_items)
 
-st.markdown(f"""
-<style>
-.index-bar-cards {{
-  display: flex;
-  gap: 16px;
-  overflow-x: auto;
-  padding: 8px 0 12px 0;
-  margin-bottom: 18px;
-  scrollbar-color: #888 #222;
-  scrollbar-width: thin;
-}}
-.index-card {{
-  min-width: 150px;
-  background: #23272f;
-  border-radius: 10px;
-  color: white;
-  padding: 12px 18px;
-  box-shadow: 0 2px 8px #0002;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
-}}
-.index-card.green {{ background: #1e7e34; }}
-.index-card.red {{ background: #c82333; }}
-.index-card.gray {{ background: #444; }}
-.index-title {{ font-weight: bold; font-size: 1.1em; letter-spacing: 0.5px; }}
-.index-price {{ font-size: 1.3em; margin: 4px 0; }}
-.index-change {{ font-size: 1em; }}
-.index-time {{ font-size: 0.85em; color: #ccc; margin-top: 4px; }}
-</style>
-<div class="index-bar-cards">{bar_cards_html}</div>
-""", unsafe_allow_html=True)
+# --- TRADE IDEAS BOX ---
+trade_ideas = [
+    {
+        "Ticker": "MRVL",
+        "Type": "AL",
+        "Date": "2025-05-13",
+        "Price": 64.50,
+        "Note": "Uzun vadeli büyüme potansiyeli"
+    },
+    # Başka öneriler eklenebilir
+]
+
+# Güncel fiyat ve performans hesapla
+for idea in trade_ideas:
+    try:
+        ticker = yf.Ticker(idea["Ticker"])
+        hist = ticker.history(period="1d", interval="1m")
+        if not hist.empty:
+            current_price = hist['Close'].iloc[-1]
+            idea["Current Price"] = current_price
+            idea["Performance"] = ((current_price - idea["Price"]) / idea["Price"]) * 100
+        else:
+            idea["Current Price"] = None
+            idea["Performance"] = None
+    except Exception:
+        idea["Current Price"] = None
+        idea["Performance"] = None
+
+# ---
+
+# Endeks barı ve öneri kutusu aynı satırda olacak şekilde iki sütun oluştur
+col1, col2 = st.columns([4, 1])
+
+with col1:
+    st.markdown(f"""
+    <style>
+    .index-bar-cards {{
+      display: flex;
+      gap: 16px;
+      overflow-x: auto;
+      padding: 8px 0 12px 0;
+      margin-bottom: 18px;
+      scrollbar-color: #888 #222;
+      scrollbar-width: thin;
+    }}
+    .index-card {{
+      min-width: 150px;
+      background: #23272f;
+      border-radius: 10px;
+      color: white;
+      padding: 12px 18px;
+      box-shadow: 0 2px 8px #0002;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
+    }}
+    .index-card.green {{ background: #1e7e34; }}
+    .index-card.red {{ background: #c82333; }}
+    .index-card.gray {{ background: #444; }}
+    .index-title {{ font-weight: bold; font-size: 1.1em; letter-spacing: 0.5px; }}
+    .index-price {{ font-size: 1.3em; margin: 4px 0; }}
+    .index-change {{ font-size: 1em; }}
+    .index-time {{ font-size: 0.85em; color: #ccc; margin-top: 4px; }}
+    </style>
+    <div class="index-bar-cards">{bar_cards_html}</div>
+    """, unsafe_allow_html=True)
+
+with col2:
+    st.markdown("""
+    <style>
+    .trade-idea-box {
+        background: linear-gradient(135deg, #23272f 60%, #1e7e34 100%);
+        border-radius: 16px;
+        padding: 18px 16px 14px 16px;
+        color: #fff;
+        box-shadow: 0 2px 12px #0003;
+        font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
+        margin-bottom: 18px;
+        min-width: 210px;
+        max-width: 270px;
+    }
+    .trade-idea-title { font-size: 1.18em; font-weight: 700; margin-bottom: 8px; }
+    .trade-idea-row { margin-bottom: 7px; }
+    .trade-idea-label { color: #b5b5b5; font-size: 0.98em; }
+    .trade-idea-perf-pos { color: #6ee26e; font-weight: bold; }
+    .trade-idea-perf-neg { color: #ff5c5c; font-weight: bold; }
+    </style>
+    """, unsafe_allow_html=True)
+    for idea in trade_ideas:
+        perf = idea.get("Performance")
+        perf_str = f"{perf:+.2f}%" if perf is not None else "N/A"
+        perf_class = "trade-idea-perf-pos" if perf is not None and perf >= 0 else "trade-idea-perf-neg"
+        price_str = f"{idea['Price']:.2f}" if idea.get('Price') is not None else "N/A"
+        curr_str = f"{idea.get('Current Price', 0):.2f}" if idea.get('Current Price') is not None else "N/A"
+        st.markdown(f"""
+        <div class="trade-idea-box">
+            <div class="trade-idea-title">Trade Ideas</div>
+            <div class="trade-idea-row"><span class="trade-idea-label">Symbol:</span> {idea['Ticker']}</div>
+            <div class="trade-idea-row"><span class="trade-idea-label">Action:</span> {idea['Type']} ({idea['Date']})</div>
+            <div class="trade-idea-row"><span class="trade-idea-label">Entry Price:</span> {price_str}</div>
+            <div class="trade-idea-row"><span class="trade-idea-label">Current Price:</span> {curr_str}</div>
+            <div class="trade-idea-row"><span class="trade-idea-label">Performance:</span> <span class="{perf_class}">{perf_str}</span></div>
+        </div>
+        """, unsafe_allow_html=True)
 
 # Calculate the target "last Friday" date
 today = date.today()
