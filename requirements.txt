@@ -5,7 +5,8 @@ numpy
 requests
 beautifulsoup4
 feedparser
-aiohttp
-nest_asyncio
 matplotlib
 mplfinance
+lxml
+aiohttp
+nest_asyncio
