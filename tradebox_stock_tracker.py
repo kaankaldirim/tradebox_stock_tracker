@@ -15,6 +15,10 @@ import aiohttp
 import nest_asyncio
 import base64
 import urllib.parse
+import matplotlib.pyplot as plt
+import io
+import matplotlib.dates as mdates
+import mplfinance as mpf
 
 st.set_page_config(page_title="Tradebox Stock Tracker", layout="wide")
 
@@ -70,6 +74,35 @@ major_indices = {
     'Ethereum': 'ETH-USD',
     'US10Y': '^TNX',
 }
+
+def get_index_time(symbol):
+    # Try to get the latest time for the index (using yfinance), show as GMT+3 (Istanbul)
+    try:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period="1d", interval="1m")
+        if not hist.empty:
+            ts = hist.index[-1]
+            istanbul = pytz.timezone('Europe/Istanbul')
+            ts_ist = ts.tz_localize('UTC').astimezone(istanbul) if ts.tzinfo is None else ts.astimezone(istanbul)
+            return ts_ist.strftime('%H:%M')
+    except Exception:
+        pass
+    return "-"
+
+def get_sparkline_svg(prices, width=80, height=24, color="#fff"):
+    if prices is None or len(prices) < 2:
+        return ""
+    prices = np.array(prices)
+    # Normalize to [0, height]
+    min_p, max_p = np.min(prices), np.max(prices)
+    if max_p - min_p == 0:
+        y = np.full_like(prices, height//2)
+    else:
+        y = height - ((prices - min_p) / (max_p - min_p) * (height-4) + 2)
+    x = np.linspace(2, width-2, len(prices))
+    points = " ".join(f"{int(xi)},{int(yi)}" for xi, yi in zip(x, y))
+    svg = f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" fill="none" xmlns="http://www.w3.org/2000/svg"><polyline points="{points}" fill="none" stroke="{color}" stroke-width="2"/></svg>'
+    return svg
 
 @st.cache_data(ttl=300)
 def get_index_prices_and_changes():
@@ -143,88 +176,77 @@ if st.button("Refresh Data", help="Click to refresh all data immediately."):
     st.cache_data.clear()
 st.markdown('</div>', unsafe_allow_html=True)
 
-# --- Endeks kutularına ok ve sparkline ekle ---
-def get_index_time(symbol):
-    # Try to get the latest time for the index (using yfinance), show as GMT+3 (Istanbul)
-    try:
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period="1d", interval="1m")
-        if not hist.empty:
-            ts = hist.index[-1]
-            istanbul = pytz.timezone('Europe/Istanbul')
-            ts_ist = ts.tz_localize('UTC').astimezone(istanbul) if ts.tzinfo is None else ts.astimezone(istanbul)
-            return ts_ist.strftime('%H:%M')
-    except Exception:
-        pass
-    return "-"
-
-def get_sparkline_svg(prices, width=80, height=24, color="#fff"):
-    if prices is None or len(prices) < 2:
-        return ""
-    import numpy as np
-    prices = np.array(prices)
-    # Normalize to [0, height]
-    min_p, max_p = np.min(prices), np.max(prices)
-    if max_p - min_p == 0:
-        y = np.full_like(prices, height//2)
-    else:
-        y = height - ((prices - min_p) / (max_p - min_p) * (height-4) + 2)
-    x = np.linspace(2, width-2, len(prices))
-    points = " ".join(f"{int(xi)},{int(yi)}" for xi, yi in zip(x, y))
-    svg = f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" fill="none" xmlns="http://www.w3.org/2000/svg"><polyline points="{points}" fill="none" stroke="{color}" stroke-width="2"/></svg>'
-    return svg
-
-bar_card_items = []
+# --- MODERN TICKER TAPE (SCROLLING INDEX BAR) ---
+ticker_items = []
 for name, symbol in major_indices.items():
     price = index_prices.get(name)
     change = index_changes.get(name)
-    # Ok işareti
     if change is not None:
-        if change > 0:
-            arrow = '<span style="color:#6ee26e;font-size:1.1em;vertical-align:middle;">▲</span>'
-        elif change < 0:
-            arrow = '<span style="color:#ff5c5c;font-size:1.1em;vertical-align:middle;">▼</span>'
-        else:
-            arrow = ''
-    else:
-        arrow = ''
-    price_str = f"{price:,.2f}" if price is not None else "N/A"
-    time_str = get_index_time(symbol)
-    if change is not None:
-        color_class = "green" if change >= 0 else "red"
-        sign = "+" if change >= 0 else ""
+        arrow = "▲" if change > 0 else "▼" if change < 0 else ""
+        color = "#6ee26e" if change > 0 else "#ff5c5c" if change < 0 else "#ccc"
+        sign = "+" if change > 0 else ""
         change_str = f"{arrow} {sign}{change:.2f}%"
     else:
-        color_class = "gray"
+        color = "#ccc"
         change_str = "N/A"
-    # Sparkline için fiyat verisi çek
-    try:
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period="1d", interval="5m")['Close']
-        spark_prices = hist[-16:].tolist() if len(hist) >= 16 else hist.tolist()
-    except Exception:
-        spark_prices = []
-    spark_svg = get_sparkline_svg(spark_prices, color="#fff" if color_class=="gray" else ("#6ee26e" if color_class=="green" else "#ff5c5c"))
-    bar_card_items.append(
-        f"<div class='index-card {color_class}'><div class='index-title'>{name}</div><div class='index-price'>{price_str}</div><div class='index-change'>{change_str}</div>"
-        f"<div style='margin:4px 0 0 0;'>{spark_svg}</div>"
-        f"<div class='index-time'>{time_str}</div></div>"
+    price_str = f"{price:,.2f}" if price is not None else "N/A"
+    ticker_items.append(
+        f"<span class='ticker-item' style='color:{color};'><b>{name}</b> {price_str} <span>{change_str}</span></span>"
     )
-bar_cards_html = ''.join(bar_card_items)
+ticker_tape_html = " ".join(ticker_items)
 
-# --- TRADE IDEAS BOX ---
+st.markdown(f'''
+<style>
+.ticker-tape {{
+  width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+  background: rgba(30,32,36,0.85);
+  border-radius: 10px;
+  padding: 10px 0 10px 0;
+  margin-bottom: 18px;
+  font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
+  font-size: 1.13em;
+  box-shadow: 0 2px 8px #0002;
+}}
+.ticker-item {{
+  display: inline-block;
+  margin: 0 32px 0 0;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}}
+</style>
+<div class="ticker-tape">{ticker_tape_html}</div>
+''', unsafe_allow_html=True)
+
+# --- TRADE IDEAS CENTERED BELOW INDEX BAR ---
 trade_ideas = [
     {
         "Ticker": "MRVL",
         "Type": "AL",
         "Date": "2025-05-13",
         "Price": 64.50,
-        "Note": "Uzun vadeli büyüme potansiyeli"
+        "StopLoss": 59.40,
+        "TakeProfit": 73.50,
     },
-    # Başka öneriler eklenebilir
+    {
+        "Ticker": "NVDA",
+        "Type": "AL",
+        "Date": "2025-05-12",
+        "Price": 122.21,
+        "StopLoss": 116.80,
+        "TakeProfit": 143.50,
+    },
+    {
+        "Ticker": "AAL",
+        "Type": "AL",
+        "Date": "2025-05-08",
+        "Price": 10.78,
+        "StopLoss": 9.90,
+        "TakeProfit": 12.50,
+    },
 ]
-
-# Güncel fiyat ve performans hesapla
+# Update current price and performance for each trade idea
 for idea in trade_ideas:
     try:
         ticker = yf.Ticker(idea["Ticker"])
@@ -240,144 +262,153 @@ for idea in trade_ideas:
         idea["Current Price"] = None
         idea["Performance"] = None
 
-# ---
+def get_sparkline_base64(ticker):
+    try:
+        hist = yf.Ticker(ticker).history(period="1mo", interval="1d")['Close']
+        if hist.empty:
+            return ""
+        fig, ax = plt.subplots(figsize=(2.2, 0.7))
+        ax.plot(hist.values, color="#6ee26e", linewidth=2)
+        ax.axis('off')
+        plt.tight_layout(pad=0)
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", bbox_inches='tight', pad_inches=0, transparent=True)
+        plt.close(fig)
+        buf.seek(0)
+        img_base64 = base64.b64encode(buf.read()).decode()
+        return f'<img src="data:image/png;base64,{img_base64}" style="height:38px;vertical-align:middle;margin-left:12px;" />'
+    except Exception:
+        return ""
 
-# Endeks barı ve öneri kutusu aynı satırda olacak şekilde iki sütun oluştur
-col1, col2 = st.columns([4, 1])
+# Mini candle chart for each trade idea
+def get_candle_base64(ticker):
+    try:
+        hist = yf.Ticker(ticker).history(period="1mo", interval="1d")
+        if hist.empty or len(hist) < 2:
+            return ""
+        fig, ax = plt.subplots(figsize=(2.2, 1.2))
+        mpf.plot(hist, type='candle', ax=ax, style='charles', xrotation=0, datetime_format='%d', tight_layout=True, show_nontrading=True)
+        ax.set_axis_off()
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", bbox_inches='tight', pad_inches=0, transparent=True)
+        plt.close(fig)
+        buf.seek(0)
+        img_base64 = base64.b64encode(buf.read()).decode()
+        return f'<img src="data:image/png;base64,{img_base64}" style="height:54px;vertical-align:middle;margin-left:16px;" />'
+    except Exception:
+        return ""
 
-with col1:
-    st.markdown(f"""
-    <style>
-    .index-bar-cards {{
-      display: flex;
-      gap: 16px;
-      overflow-x: auto;
-      padding: 8px 0 12px 0;
-      margin-bottom: 18px;
-      scrollbar-color: #888 #222;
-      scrollbar-width: thin;
-    }}
-    .index-card {{
-      min-width: 150px;
-      background: #23272f;
-      border-radius: 10px;
-      color: white;
-      padding: 12px 18px;
-      box-shadow: 0 2px 8px #0002;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
-    }}
-    .index-card.green {{ background: #1e7e34; }}
-    .index-card.red {{ background: #c82333; }}
-    .index-card.gray {{ background: #444; }}
-    .index-title {{ font-weight: bold; font-size: 1.1em; letter-spacing: 0.5px; }}
-    .index-price {{ font-size: 1.3em; margin: 4px 0; }}
-    .index-change {{ font-size: 1em; }}
-    .index-time {{ font-size: 0.85em; color: #ccc; margin-top: 4px; }}
-    </style>
-    <div class="index-bar-cards">{bar_cards_html}</div>
-    """, unsafe_allow_html=True)
+# Show Trade Ideas boxes side by side (horizontally), left-aligned, with candle chart
+trade_ideas_boxes_html = ""
+for idea in trade_ideas:
+    perf = idea.get("Performance")
+    perf_str = f"{perf:+.2f}%" if perf is not None else "N/A"
+    perf_class = "trade-idea-perf-pos" if perf is not None and perf >= 0 else "trade-idea-perf-neg"
+    price_str = f"{idea['Price']:.2f}" if idea.get('Price') is not None else "N/A"
+    curr_str = f"{idea.get('Current Price', 0):.2f}" if idea.get('Current Price') is not None else "N/A"
+    stop_str = f"{idea.get('StopLoss', 0):.2f}" if idea.get('StopLoss') is not None else "N/A"
+    tp_str = f"{idea.get('TakeProfit', 0):.2f}" if idea.get('TakeProfit') is not None else "N/A"
+    candle_img = get_candle_base64(idea['Ticker'])
+    trade_ideas_boxes_html += (
+        f'<div class="trade-idea-box">'
+        f'<div class="trade-idea-content">'
+        f'<div>'
+        f'<div class="trade-idea-title">Trade Ideas</div>'
+        f'<div class="trade-idea-row"><span class="trade-idea-label">Symbol:</span> {idea["Ticker"]}</div>'
+        f'<div class="trade-idea-row"><span class="trade-idea-label">Action:</span> {idea["Type"]} ({idea["Date"]})</div>'
+        f'<div class="trade-idea-row"><span class="trade-idea-label">Entry Price:</span> {price_str}</div>'
+        f'<div class="trade-idea-row"><span class="trade-idea-label">Stop Loss:</span> {stop_str}</div>'
+        f'<div class="trade-idea-row"><span class="trade-idea-label">Take Profit:</span> {tp_str}</div>'
+        f'<div class="trade-idea-row"><span class="trade-idea-label">Current Price:</span> {curr_str}</div>'
+        f'<div class="trade-idea-row"><span class="trade-idea-label">Performance:</span> <span class="{perf_class}">{perf_str}</span></div>'
+        f'</div>'
+        f'{candle_img}'
+        f'</div>'
+        f'</div>'
+    )
+st.markdown(f"""
+<style>
+.trade-ideas-row-center {{
+    display: flex;
+    justify-content: flex-start;
+    gap: 32px;
+    flex-wrap: wrap;
+    margin-left: 0;
+}}
+.trade-idea-box {{
+    background: linear-gradient(135deg, #23272f 60%, #1e7e34 100%);
+    border-radius: 16px;
+    padding: 18px 16px 14px 16px;
+    color: #fff;
+    box-shadow: 0 2px 12px #0003;
+    font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
+    min-width: 260px;
+    max-width: 320px;
+    display: flex;
+    align-items: center;
+}}
+.trade-idea-content {{
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0;
+}}
+.trade-idea-title {{ font-size: 1.18em; font-weight: 700; margin-bottom: 8px; }}
+.trade-idea-row {{ margin-bottom: 7px; }}
+.trade-idea-label {{ color: #b5b5b5; font-size: 0.98em; }}
+.trade-idea-perf-pos {{ color: #6ee26e; font-weight: bold; }}
+.trade-idea-perf-neg {{ color: #ff5c5c; font-weight: bold; }}
+</style>
+<div class="trade-ideas-row-center">
+{trade_ideas_boxes_html}
+</div>
+""", unsafe_allow_html=True)
 
-with col2:
-    st.markdown("""
-    <style>
-    .trade-idea-box {
-        background: linear-gradient(135deg, #23272f 60%, #1e7e34 100%);
-        border-radius: 16px;
-        padding: 18px 16px 14px 16px;
-        color: #fff;
-        box-shadow: 0 2px 12px #0003;
-        font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
-        margin-bottom: 18px;
-        min-width: 210px;
-        max-width: 270px;
-    }
-    .trade-idea-title { font-size: 1.18em; font-weight: 700; margin-bottom: 8px; }
-    .trade-idea-row { margin-bottom: 7px; }
-    .trade-idea-label { color: #b5b5b5; font-size: 0.98em; }
-    .trade-idea-perf-pos { color: #6ee26e; font-weight: bold; }
-    .trade-idea-perf-neg { color: #ff5c5c; font-weight: bold; }
-    </style>
-    """, unsafe_allow_html=True)
-    for idea in trade_ideas:
-        perf = idea.get("Performance")
-        perf_str = f"{perf:+.2f}%" if perf is not None else "N/A"
-        perf_class = "trade-idea-perf-pos" if perf is not None and perf >= 0 else "trade-idea-perf-neg"
-        price_str = f"{idea['Price']:.2f}" if idea.get('Price') is not None else "N/A"
-        curr_str = f"{idea.get('Current Price', 0):.2f}" if idea.get('Current Price') is not None else "N/A"
-        st.markdown(f"""
-        <div class="trade-idea-box">
-            <div class="trade-idea-title">Trade Ideas</div>
-            <div class="trade-idea-row"><span class="trade-idea-label">Symbol:</span> {idea['Ticker']}</div>
-            <div class="trade-idea-row"><span class="trade-idea-label">Action:</span> {idea['Type']} ({idea['Date']})</div>
-            <div class="trade-idea-row"><span class="trade-idea-label">Entry Price:</span> {price_str}</div>
-            <div class="trade-idea-row"><span class="trade-idea-label">Current Price:</span> {curr_str}</div>
-            <div class="trade-idea-row"><span class="trade-idea-label">Performance:</span> <span class="{perf_class}">{perf_str}</span></div>
-        </div>
-        """, unsafe_allow_html=True)
-
+# --- DATA PREPARATION (MUST BE BEFORE LAYOUT) ---
 # Calculate the target "last Friday" date
 today = date.today()
 if today.weekday() >= 4: # Friday, Saturday, Sunday
-    # Last Friday is this week's Friday
     days_to_subtract = today.weekday() - 4
 else: # Monday, Tuesday, Wednesday, Thursday
-    # Last Friday is last week's Friday
     days_to_subtract = today.weekday() + 3
 target_friday_date = today - timedelta(days=days_to_subtract)
 target_friday_ts = pd.Timestamp(target_friday_date)
 
-# Define data fetching period
 start_download_date = target_friday_ts - pd.Timedelta(days=15)
 end_download_date = target_friday_ts + pd.Timedelta(days=1)
 
-# Show last refresh time
-now = time.strftime('%Y-%m-%d %H:%M:%S')
-st.caption(f"Last data refresh: {now}")
-
-# Download historical data
 try:
     hist_data_all_fields = yf.download(tickers, start=start_download_date, end=end_download_date, progress=False)
     if hist_data_all_fields.empty:
-        st.error(f"No historical data downloaded for the period around {target_friday_ts.strftime('%Y-%m-%d')}.")
+        st.error(f"No historical data downloaded for the period around {target_friday_ts.strftime('%Y-%m-%d') }.")
         st.stop()
     close_prices_hist = hist_data_all_fields['Close']
-    # If only one ticker, yf.download might return a Series for 'Close'. Ensure it's a DataFrame.
     if isinstance(close_prices_hist, pd.Series):
         close_prices_hist = close_prices_hist.to_frame(name=tickers[0] if len(tickers) == 1 else 'Close')
-        if len(tickers) == 1 : # if it was a series and became a frame, column name is ticker
-             pass # Already named correctly
-        elif 'Close' in close_prices_hist.columns and len(tickers) >1 : #Should not happen often with list of tickers
+        if len(tickers) == 1 :
+             pass
+        elif 'Close' in close_prices_hist.columns and len(tickers) >1 :
              st.warning("Unexpected data structure for close_prices_hist from yfinance.")
-
-
 except Exception as e:
     st.error(f"Error downloading data from Yahoo Finance: {e}")
     st.stop()
 
-# Filter data up to the target Friday and ensure index is DatetimeIndex
 df_idx = close_prices_hist.index
 if not isinstance(df_idx, pd.DatetimeIndex):
     close_prices_hist.index = pd.to_datetime(close_prices_hist.index)
 
-# Find the last available trading day BEFORE today (for pre-market % change)
 dates_before_today = close_prices_hist.index[close_prices_hist.index < pd.Timestamp.today().normalize()]
 if len(dates_before_today) == 0:
     st.error(f"No trading data found before today.")
     st.stop()
 last_trading_day = dates_before_today[-1]
 
-# Prepare the main DataFrame for display
 last_day_closes = close_prices_hist.loc[last_trading_day]
 df_display = pd.DataFrame(index=last_day_closes.index)
 df_display['Ticker'] = df_display.index
-# Add company name column using async results
 df_display['Company Name'] = df_display['Ticker'].map(company_names)
 df_display[f'Close ({last_trading_day.strftime("%Y-%m-%d")})'] = last_day_closes
 
-# Find the previous trading day (for % change)
 dates_before_last = close_prices_hist.index[close_prices_hist.index < last_trading_day]
 if len(dates_before_last) == 0:
     prev_trading_day = None
@@ -390,20 +421,27 @@ if prev_trading_day is not None:
 else:
     df_display['% Change'] = float('nan')
 
-# --- Modify fetch_ticker_data to use last_official_close for pre-market % change ---
+def color_pnl(val):
+    try:
+        v = float(val)
+        if v > 0:
+            return 'color: #188038; font-weight: bold;'
+        elif v < 0:
+            return 'color: #d93025; font-weight: bold;'
+    except:
+        pass
+    return ''
+
 def fetch_ticker_data(ticker_symbol, last_official_close):
     try:
         ticker_obj = yf.Ticker(ticker_symbol)
         info = ticker_obj.fast_info
-        # Last price
         hist = ticker_obj.history(period="1d", interval="1m")
         last_price = hist['Close'].iloc[-1] if not hist.empty else None
-        # Last price % change from last official close
         if pd.notnull(last_price) and pd.notnull(last_official_close) and last_official_close != 0:
             last_price_change = ((last_price - last_official_close) / last_official_close) * 100
         else:
             last_price_change = None
-        # Pre-market price: only use the latest price before 09:30 US/Eastern
         us_eastern = pytz.timezone('US/Eastern')
         pre_hist = ticker_obj.history(period="2d", interval="1m", prepost=True)
         pre_market_price = None
@@ -415,12 +453,10 @@ def fetch_ticker_data(ticker_symbol, last_official_close):
                     pre_market_price = row['Close']
                     pre_market_ts = ts_est
                     break
-        # Pre-market % change: only if pre-market price exists
         if pre_market_price is not None and last_official_close is not None and last_official_close != 0:
             pre_market_change = ((pre_market_price - last_official_close) / last_official_close) * 100
         else:
             pre_market_change = None
-        # Market cap, P/E
         market_cap = info.get('marketCap', None)
         pe = info.get('pe_ratio', None)
         if pe is None:
@@ -449,57 +485,35 @@ def fetch_ticker_data(ticker_symbol, last_official_close):
             "P/E Ratio": None,
         }
 
-# --- Update ThreadPoolExecutor to pass last_official_close ---
 with ThreadPoolExecutor(max_workers=8) as executor:
     results = list(executor.map(lambda t: fetch_ticker_data(t, last_official_close_dict.get(t)), df_display['Ticker']))
 
-# Build DataFrame from results
 parallel_df = pd.DataFrame(results).set_index('Ticker')
-
-# Merge with df_display to keep the same order and index
 for col in parallel_df.columns:
     df_display[col] = parallel_df[col]
-
-# Adjust the columns for display: move 'Last Price' right after 'Ticker'
-cols = ['Ticker', 'Company Name', 'Last Price', 'Last Price % Change', 'Pre-market Price', 'Pre-market % Change', 'Market Cap', 'P/E Ratio']
+cols = ['Ticker', 'Company Name', 'Last Price', 'Last Price % Change', 'Pre-market Price', 'Pre-market % Change', 'Market Cap']
 df_display = df_display[cols]
-
-# Ensure all None values are replaced with np.nan for Arrow compatibility
 for col in df_display.columns:
     try:
         df_display[col] = pd.to_numeric(df_display[col])
     except Exception:
         pass
 
-# --- Tablo formatlama ---
-def color_pnl(val):
-    try:
-        v = float(val)
-        if v > 0:
-            return 'color: #188038; font-weight: bold;'
-        elif v < 0:
-            return 'color: #d93025; font-weight: bold;'
-    except:
-        pass
-    return ''
+# --- TABLE AND TRADE IDEAS LAYOUT ---
+col1, col2 = st.columns([4, 1])
 
-def format_pe(x):
-    try:
-        return f"{float(x):.2f}"
-    except:
-        return x
-
-styled = df_display.style.format({
-    'Pre-market Price': '{:,.2f}'.format,
-    'Last Price': '{:,.2f}'.format,
-    'Market Cap': '{:,.0f}'.format,
-    'P/E Ratio': format_pe,
-    'Last Price % Change': '{:+.2f}%'.format,
-    'Pre-market % Change': '{:+.2f}%'.format,
-    '% Change': '{:+.2f}%'.format,
-}).applymap(color_pnl, subset=[col for col in ['Last Price % Change', 'Pre-market % Change', '% Change'] if col in df_display.columns])
-
-st.dataframe(styled, use_container_width=True)
+with col1:
+    now = time.strftime('%Y-%m-%d %H:%M:%S')
+    st.caption(f"Last data refresh: {now}")
+    styled = df_display.style.format({
+        'Pre-market Price': '{:,.2f}'.format,
+        'Last Price': '{:,.2f}'.format,
+        'Market Cap': '{:,.0f}'.format,
+        'Last Price % Change': '{:+.2f}%'.format,
+        'Pre-market % Change': '{:+.2f}%'.format,
+        '% Change': '{:+.2f}%'.format,
+    }).applymap(color_pnl, subset=[col for col in ['Last Price % Change', 'Pre-market % Change', '% Change'] if col in df_display.columns])
+    st.dataframe(styled, use_container_width=True)
 
 # GOOGL ve Dow Jones veri kontrolü
 if 'GOOGL' in df_display.index and df_display.loc['GOOGL'].isnull().any():
@@ -560,19 +574,3 @@ def remove_week_caption():
 #     except Exception:
 #         return '', 0 
 # ... rest of code unchanged ... 
-
-def get_index_time(symbol):
-    # Try to get the latest time for the index (using yfinance), show as GMT+3 (Istanbul)
-    try:
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period="1d", interval="1m")
-        if not hist.empty:
-            ts = hist.index[-1]
-            istanbul = pytz.timezone('Europe/Istanbul')
-            ts_ist = ts.tz_localize('UTC').astimezone(istanbul) if ts.tzinfo is None else ts.astimezone(istanbul)
-            return ts_ist.strftime('%H:%M')
-    except Exception:
-        pass
-    return "-" 
-
-# ... Latest Market News başlığı ve devamı ... 
