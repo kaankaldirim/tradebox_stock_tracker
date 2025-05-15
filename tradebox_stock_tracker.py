@@ -99,6 +99,34 @@ def get_yahoo_movers(mover_type):
 
 st.set_page_config(page_title="Tradebox Stock Tracker", layout="wide")
 
+# --- MOBİL (iOS) DOSTU CSS ---
+st.markdown('''
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<style>
+/* Navbar mobil */
+@media (max-width: 700px) {
+  .stRadio [role="radiogroup"] label { font-size: 1.08em !important; padding: 8px 10px !important; margin: 0 2px 0 0 !important; min-width: 90px; }
+}
+/* Heatmap mobil */
+@media (max-width: 700px) {
+  .sector-heatmap-mobile { flex-direction: column !important; gap: 7px !important; }
+  .sector-heatmap-mobile > div { min-width: 0 !important; width: 100% !important; margin-bottom: 4px; font-size: 0.98em !important; padding: 8px 7px !important; }
+}
+/* Kartlar mobil */
+@media (max-width: 700px) {
+  .trade-ideas-row-center { flex-direction: column !important; gap: 14px !important; align-items: stretch !important; }
+  .trade-idea-box { min-width: 0 !important; max-width: 100% !important; width: 100% !important; margin-bottom: 0 !important; padding: 12px 7px 10px 7px !important; }
+  .trade-idea-title { font-size: 1.05em !important; }
+  .trade-idea-row { font-size: 0.97em !important; }
+  .trade-idea-sparkline-img { height: 32px !important; margin-top: 8px !important; }
+}
+/* TradingView widget mobil */
+@media (max-width: 700px) {
+  .tradingview-widget-wrap iframe { height: 320px !important; min-height: 220px !important; }
+}
+</style>
+''', unsafe_allow_html=True)
+
 # --- LOGO & HEADER ---
 st.markdown('''
 <style>
@@ -247,9 +275,8 @@ sector_heatmap_data = [
     {"sector": "Consumer", "change": 1.5},
     {"sector": "Utilities", "change": -0.2},
 ]
-# Daha koyu pastel renkler
 sector_colors = lambda chg: '#234e3c' if chg > 1 else '#3a3a2e' if chg > 0 else '#4a2323' if chg < 0 else '#33343a'
-heatmap_html = '<div style="display:flex;gap:0;margin:0 0 0 0;flex-wrap:wrap;">'
+heatmap_html = '<div class="sector-heatmap-mobile" style="display:flex;gap:0;margin:0 0 0 0;flex-wrap:wrap;">'
 for i, s in enumerate(sector_heatmap_data):
     color = sector_colors(s['change'])
     sign = '+' if s['change'] > 0 else ''
