@@ -19,8 +19,94 @@ import matplotlib.pyplot as plt
 import io
 import matplotlib.dates as mdates
 import mplfinance as mpf
+from functools import lru_cache
+import json
 
 st.set_page_config(page_title="Tradebox Stock Tracker", layout="wide")
+
+# --- YAHOO FINANCE TARZI NAVBAR ---
+if 'main_section' not in st.session_state:
+    st.session_state['main_section'] = 'Market Movers'
+
+st.markdown('''
+<style>
+.us-navbar {
+  width: 100%;
+  background: #181c1f;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 0 0;
+  border-bottom: 2.5px solid #1e7e34;
+  min-height: 54px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.us-navbar-left {
+  display: flex;
+  align-items: center;
+  margin-left: 24px;
+}
+.us-navbar-title {
+  font-family: 'Montserrat', 'Segoe UI', Arial, sans-serif;
+  font-size: 2.1em;
+  color: #fff;
+  font-weight: 900;
+  letter-spacing: 1.5px;
+  margin-right: 32px;
+  text-shadow: 0 2px 12px #0008, 0 1px 0 #fff2;
+}
+.us-navbar-menu {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-right: 32px;
+}
+.us-navbar-link {
+  color: #fff;
+  font-size: 1.13em;
+  font-family: 'Montserrat', 'Segoe UI', Arial, sans-serif;
+  font-weight: 700;
+  text-decoration: none;
+  padding: 7px 18px 7px 18px;
+  border-radius: 7px;
+  transition: background 0.18s, color 0.18s;
+  cursor: pointer;
+}
+.us-navbar-link.selected, .us-navbar-link:hover {
+  background: linear-gradient(90deg, #1e7e34 60%, #23272f 100%);
+  color: #fff;
+}
+@media (max-width: 700px) {
+  .us-navbar-title { font-size: 1.18em; margin-right: 10px; }
+  .us-navbar-menu { gap: 7px; margin-right: 7px; }
+  .us-navbar-link { font-size: 0.98em; padding: 5px 8px 5px 8px; }
+  .us-navbar-left { margin-left: 7px; }
+}
+</style>
+<div class="us-navbar">
+  <div class="us-navbar-left">
+    <span class="us-navbar-title">US Stock Tracker</span>
+  </div>
+  <div class="us-navbar-menu">
+    <a class="us-navbar-link {sel1}" href="#" onclick="window.parent.postMessage({type: 'streamlit:setComponentValue', key: 'main_section', value: 'Market Movers'}, '*');return false;">Market Movers</a>
+    <a class="us-navbar-link {sel2}" href="#" onclick="window.parent.postMessage({type: 'streamlit:setComponentValue', key: 'main_section', value: 'Economic Calendar'}, '*');return false;">Economic Calendar</a>
+    <a class="us-navbar-link {sel3}" href="#" onclick="window.parent.postMessage({type: 'streamlit:setComponentValue', key: 'main_section', value: 'ETFs'}, '*');return false;">ETFs</a>
+  </div>
+</div>
+<script>
+window.addEventListener('message', function(event) {
+  if (event.data && event.data.type === 'streamlit:setComponentValue') {
+    window.location.hash = event.data.value;
+    window.parent.postMessage({type: 'streamlit:setComponentValue', key: event.data.key, value: event.data.value}, '*');
+  }
+});
+</script>
+'''.replace('{sel1}', 'selected' if st.session_state['main_section']=='Market Movers' else '').replace('{sel2}', 'selected' if st.session_state['main_section']=='Economic Calendar' else '').replace('{sel3}', 'selected' if st.session_state['main_section']=='ETFs' else ''), unsafe_allow_html=True)
+
+# --- NAVBAR KONTROLÜ ---
+section = st.session_state['main_section']
 
 # Ticker list (move this up before async scraping)
 tickers = [
@@ -141,72 +227,7 @@ if index_prices.get('Russell 2000') is None and index_prices.get('Russell 2000 E
     index_changes['Russell 2000'] = index_changes['Russell 2000 ETF']
 
 # --- MODERN DARK HEADER WITH SEARCH ---
-st.markdown("""
-<style>
-body, .stApp {{
-    background: #111 !important;
-    color: #f3f3f3 !important;
-}}
-.header-title-modern {{
-    font-family: 'Montserrat', 'Segoe UI', Arial, sans-serif;
-    font-size: 2.7em;
-    color: #fff;
-    letter-spacing: 2.2px;
-    text-align: left;
-    font-weight: 900;
-    margin-bottom: 0.1em;
-    margin-left: 10px;
-    text-shadow: 0 2px 12px #0008, 0 1px 0 #fff2;
-    display: flex;
-    align-items: center;
-}}
-.header-search-box {{
-    margin-left: 24px;
-    display: flex;
-    align-items: center;
-    background: #23272f;
-    border-radius: 8px;
-    padding: 4px 10px 4px 10px;
-    box-shadow: 0 2px 8px #0002;
-}}
-.header-search-input {{
-    background: transparent;
-    border: none;
-    color: #fff;
-    font-size: 1.1em;
-    outline: none;
-    width: 160px;
-    margin-left: 6px;
-}}
-.header-search-icon {{
-    color: #aaa;
-    font-size: 1.3em;
-    margin-right: 2px;
-}}
-@media (max-width: 700px) {{
-    .header-title-modern {{ font-size: 1.45em; margin-left: 2px; }}
-    .header-search-box {{ margin-left: 10px; padding: 2px 6px 2px 6px; }}
-    .header-search-input {{ font-size: 1em; width: 90px; }}
-}}
-</style>
-<div style="display:flex;align-items:center;justify-content:space-between;">
-  <div class="header-title-modern">
-    US Stock Tracker
-    <span class="header-search-box">
-      <span class="header-search-icon">🔍</span>
-      <input class="header-search-input" id="header-search-input" type="text" placeholder="Search..." />
-    </span>
-  </div>
-</div>
-<hr class="header-underline-modern" style="border-top:2px solid #444;opacity:0.7;width:60%;margin:0 0 18px 10px;">
-<script>
-document.getElementById('header-search-input').addEventListener('keydown', function(e) {{
-  if (e.key === 'Enter') {{
-    window.parent.postMessage({{type: 'streamlit:setComponentValue', value: this.value}}, '*');
-  }}
-}});
-</script>
-""", unsafe_allow_html=True)
+# (Bu bölümü tamamen kaldır)
 
 # --- MODERN TICKER TAPE (SCROLLING INDEX BAR) ---
 ticker_items = []
@@ -595,15 +616,49 @@ col1, col2 = st.columns([4, 1])
 with col1:
     now = time.strftime('%Y-%m-%d %H:%M:%S')
     st.caption(f"Last data refresh: {now}")
-    styled = df_display.style.format({
-        'Pre-market Price': '{:,.2f}'.format,
-        'Last Price': '{:,.2f}'.format,
-        'Market Cap': '{:,.0f}'.format,
-        'Last Price % Change': '{:+.2f}%'.format,
-        'Pre-market % Change': '{:+.2f}%'.format,
-        '% Change': '{:+.2f}%'.format,
-    }).applymap(color_pnl, subset=[col for col in ['Last Price % Change', 'Pre-market % Change', '% Change'] if col in df_display.columns])
-    st.dataframe(styled, use_container_width=True)
+    def make_yahoo_link(val):
+        if pd.isnull(val):
+            return val
+        url = f'https://finance.yahoo.com/quote/{val}'
+        return f'{val}'  # st.dataframe HTML desteklemez, düz metin
+    def format_market_cap(val):
+        try:
+            val = float(val)
+            if val >= 1e9:
+                return f"{val/1e9:.1f}B"
+            elif val >= 1e6:
+                return f"{val/1e6:.1f}M"
+            else:
+                return f"{val:.0f}"
+        except:
+            return val
+    df_disp = df_display.copy()
+    df_disp['Ticker'] = df_disp['Ticker'].apply(make_yahoo_link)
+    df_disp['Pre-market Price'] = df_disp['Pre-market Price'].map(lambda x: f"{x:,.2f}" if pd.notnull(x) else "")
+    df_disp['Last Price'] = df_disp['Last Price'].map(lambda x: f"{x:,.2f}" if pd.notnull(x) else "")
+    df_disp['Market Cap'] = df_disp['Market Cap'].map(format_market_cap)
+    if 'Last Price % Change' in df_disp:
+        df_disp['Last Price % Change'] = df_disp['Last Price % Change'].map(lambda x: f"{float(x):+0.2f}%" if pd.notnull(x) else "")
+    if 'Pre-market % Change' in df_disp:
+        df_disp['Pre-market % Change'] = df_disp['Pre-market % Change'].map(lambda x: f"{float(x):+0.2f}%" if pd.notnull(x) else "")
+    if '% Change' in df_disp:
+        df_disp['% Change'] = df_disp['% Change'].map(lambda x: f"{float(x):+0.2f}%" if pd.notnull(x) else "")
+    # Index sütununu kaldır
+    df_disp = df_disp.reset_index(drop=True)
+    # Negatif/pozitif renklendirme için Styler kullan
+    def color_pnl(val):
+        try:
+            v = float(str(val).replace('%',''))
+            if v > 0:
+                return 'color: #188038; font-weight: bold;'
+            elif v < 0:
+                return 'color: #d93025; font-weight: bold;'
+        except:
+            pass
+        return ''
+    style_cols = [col for col in ['Last Price % Change', 'Pre-market % Change', '% Change'] if col in df_disp.columns]
+    styled = df_disp.style.applymap(color_pnl, subset=style_cols)
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
 # GOOGL ve Dow Jones veri kontrolü
 if 'GOOGL' in df_display.index and df_display.loc['GOOGL'].isnull().any():
@@ -664,3 +719,165 @@ def remove_week_caption():
 #     except Exception:
 #         return '', 0 
 # ... rest of code unchanged ... 
+
+# --- MARKET MOVERS TAB ---
+# (Bu bölümü tamamen kaldır)
+
+# --- Market Movers veri çekme fonksiyonu ---
+@lru_cache(maxsize=3)
+def get_yahoo_movers(mover_type):
+    url_map = {
+        'gainers': 'https://finance.yahoo.com/screener/predefined/day_gainers',
+        'losers': 'https://finance.yahoo.com/screener/predefined/day_losers',
+        'actives': 'https://finance.yahoo.com/screener/predefined/most_actives',
+    }
+    url = url_map[mover_type]
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(url, headers=headers, timeout=10)
+    soup = BeautifulSoup(r.text, "html.parser")
+    table = soup.find('table')
+    if not table:
+        return pd.DataFrame()
+    df = pd.read_html(str(table))[0]
+    df = df.head(15)
+    return df
+
+# --- NAVBAR KONTROLÜ ---
+section = st.session_state['main_section']
+
+if section == 'Market Movers':
+    st.subheader('Market Movers (US)')
+    movers_tab = st.tabs(["Gainers", "Losers", "Actives"])
+    movers_types = ['gainers', 'losers', 'actives']
+    for i, tab in enumerate(movers_tab):
+        with tab:
+            df = get_yahoo_movers(movers_types[i])
+            if not df.empty:
+                # Renkli değişim sütunu
+                if '% Change' in df.columns:
+                    def color_mover(val):
+                        try:
+                            v = float(str(val).replace('%',''))
+                            if v > 0:
+                                return 'color: #188038; font-weight: bold;'
+                            elif v < 0:
+                                return 'color: #d93025; font-weight: bold;'
+                        except:
+                            pass
+                        return ''
+                    styled = df.style.applymap(color_mover, subset=['% Change'])
+                    st.dataframe(styled, use_container_width=True, hide_index=True)
+                else:
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No data found.")
+elif section == 'Economic Calendar':
+    st.subheader('Upcoming Major Economic Events')
+    @st.cache_data(ttl=604800)
+    def fetch_economic_calendar():
+        url = "https://tradingeconomics.com/calendar"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(r.text, "html.parser")
+        table = soup.find('table', {'id': 'calendar'})
+        if not table:
+            return pd.DataFrame()
+        rows = table.find_all('tr')
+        events = []
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 7:
+                date = cols[0].text.strip()
+                time = cols[1].text.strip()
+                country = cols[2].text.strip()
+                event = cols[3].text.strip()
+                importance = cols[4].get('title', '').strip() if cols[4].get('title') else cols[4].text.strip()
+                actual = cols[5].text.strip()
+                forecast = cols[6].text.strip()
+                previous = cols[7].text.strip() if len(cols) > 7 else ''
+                # Sadece önemli ülkeler ve önemli eventler (ABD, Eurozone, İngiltere, Çin, Japonya)
+                if country in ['United States', 'Euro Area', 'Germany', 'United Kingdom', 'China', 'Japan']:
+                    events.append({
+                        "Date": date,
+                        "Time": time,
+                        "Country": country,
+                        "Event": event,
+                        "Actual": actual,
+                        "Forecast": forecast,
+                        "Previous": previous,
+                        "Importance": importance
+                    })
+        df = pd.DataFrame(events)
+        return df
+    econ_df = fetch_economic_calendar()
+    if not econ_df.empty:
+        def impact_color(val):
+            if 'high' in str(val).lower():
+                return 'background-color: #d93025; color: #fff; font-weight: bold;'
+            elif 'medium' in str(val).lower():
+                return 'background-color: #fbbc04; color: #222; font-weight: bold;'
+            elif 'low' in str(val).lower():
+                return 'background-color: #6ee26e; color: #222; font-weight: bold;'
+            else:
+                return ''
+        styled = econ_df.style.applymap(impact_color, subset=['Importance'])
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+    else:
+        st.info("No economic events found.")
+elif section == 'ETFs':
+    st.subheader('Most Traded US ETFs')
+    etf_list = [
+        {"Symbol": "SPY", "Name": "SPDR S&P 500 ETF Trust"},
+        {"Symbol": "QQQ", "Name": "Invesco QQQ Trust"},
+        {"Symbol": "IWM", "Name": "iShares Russell 2000 ETF"},
+        {"Symbol": "VTI", "Name": "Vanguard Total Stock Market ETF"},
+        {"Symbol": "DIA", "Name": "SPDR Dow Jones Industrial Average ETF Trust"},
+        {"Symbol": "GLD", "Name": "SPDR Gold Shares"},
+        {"Symbol": "TLT", "Name": "iShares 20+ Year Treasury Bond ETF"},
+        {"Symbol": "XLF", "Name": "Financial Select Sector SPDR Fund"},
+        {"Symbol": "XLE", "Name": "Energy Select Sector SPDR Fund"},
+        {"Symbol": "XLY", "Name": "Consumer Discretionary Select Sector SPDR Fund"},
+        {"Symbol": "XLC", "Name": "Communication Services Select Sector SPDR Fund"},
+        {"Symbol": "XLI", "Name": "Industrial Select Sector SPDR Fund"},
+        {"Symbol": "XLV", "Name": "Health Care Select Sector SPDR Fund"},
+        {"Symbol": "ARKK", "Name": "ARK Innovation ETF"},
+        {"Symbol": "EEM", "Name": "iShares MSCI Emerging Markets ETF"},
+    ]
+    etf_df = pd.DataFrame(etf_list)
+    # Fiyat, değişim, hacim ekle (yfinance ile hızlıca çek)
+    def get_etf_data(symbol):
+        try:
+            t = yf.Ticker(symbol)
+            hist = t.history(period="1d", interval="1m")
+            last_price = hist['Close'].iloc[-1] if not hist.empty else None
+            change = None
+            if not hist.empty and len(hist) > 1:
+                prev = hist['Close'].iloc[0]
+                change = ((last_price - prev) / prev) * 100 if prev else None
+            volume = hist['Volume'].iloc[-1] if not hist.empty else None
+            return last_price, change, volume
+        except:
+            return None, None, None
+    import time as _time
+    etf_df['Last Price'] = None
+    etf_df['% Change'] = None
+    etf_df['Volume'] = None
+    for i, row in etf_df.iterrows():
+        price, chg, vol = get_etf_data(row['Symbol'])
+        etf_df.at[i, 'Last Price'] = f"{price:,.2f}" if price is not None else "-"
+        etf_df.at[i, '% Change'] = f"{chg:+.2f}%" if chg is not None else "-"
+        etf_df.at[i, 'Volume'] = f"{int(vol):,}" if vol is not None else "-"
+        _time.sleep(0.1)  # yfinance rate limit
+    def etf_color(val):
+        try:
+            v = float(str(val).replace('%',''))
+            if v > 0:
+                return 'color: #188038; font-weight: bold;'
+            elif v < 0:
+                return 'color: #d93025; font-weight: bold;'
+        except:
+            pass
+        return ''
+    styled = etf_df.style.applymap(etf_color, subset=['% Change'])
+    st.dataframe(styled, use_container_width=True, hide_index=True)
+# ... existing code ... 
