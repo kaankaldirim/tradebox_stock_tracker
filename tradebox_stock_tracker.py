@@ -23,6 +23,58 @@ from functools import lru_cache
 import json
 from io import StringIO
 import calendar
+import random
+import re
+
+# --- NEWS KARTLARI İÇİN FAVICON, PREVIEW IMAGE ve KATEGORİ ---
+def get_favicon(domain):
+    return f"https://www.google.com/s2/favicons?domain={domain}&sz=32"
+
+def get_news_image(entry):
+    # RSS'de media_content veya media:thumbnail veya links'te image olabilir
+    if hasattr(entry, 'media_content') and entry.media_content:
+        url = entry.media_content[0].get('url', '')
+        if url: return url
+    if hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
+        url = entry.media_thumbnail[0].get('url', '')
+        if url: return url
+    if hasattr(entry, 'links'):
+        for l in entry.links:
+            if l.get('type', '').startswith('image'):
+                url = l.get('href', '')
+                if url: return url
+    # Başlıktan anahtar kelime seç, Unsplash görseli oluştur
+    stopwords = set(['the','a','an','and','or','for','to','of','in','on','at','by','with','is','are','was','were','be','as','from','that','this','it','its','but','not','will','may','can','should','after','up','over','why','how','if','so','than','then','out','off','into','about','more','less','new','old','all','any','some','no','yes','just','you','i','we','he','she','they','their','his','her','our','your','my','me','us','them','who','what','which','when','where'])
+    title = getattr(entry, 'title', '')
+    words = re.findall(r"\b\w+\b", title.lower())
+    keywords = [w for w in words if w not in stopwords and len(w) > 2][:2]
+    if keywords:
+        unsplash_url = f"https://source.unsplash.com/600x400/?{','.join(keywords)}"
+        return unsplash_url
+    # Kategoriye göre fallback
+    cat = None
+    if hasattr(entry, 'title'):
+        cat = get_category(entry.title)
+    default_images = {
+        "Tech": "https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=600&q=80",
+        "Earnings": "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=600&q=80",
+        "Macro": "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=600&q=80",
+        "Dividend": "https://images.unsplash.com/photo-1464983953574-0892a716854b?auto=format&fit=crop&w=600&q=80",
+        "General": "https://images.unsplash.com/photo-1465101046530-73398c7f28ca?auto=format&fit=crop&w=600&q=80"
+    }
+    return default_images.get(cat, default_images["General"])
+
+def get_category(title):
+    title = title.lower()
+    if any(x in title for x in ["earnings", "profit", "revenue"]):
+        return "Earnings"
+    if any(x in title for x in ["dividend"]):
+        return "Dividend"
+    if any(x in title for x in ["inflation", "fed", "macro", "cpi", "ecb", "rate"]):
+        return "Macro"
+    if any(x in title for x in ["ai", "tech", "chip", "semiconductor", "nvidia", "apple", "google", "microsoft"]):
+        return "Tech"
+    return "General"
 
 # --- Market Movers veri çekme fonksiyonu ---
 @lru_cache(maxsize=3)
@@ -50,11 +102,18 @@ st.set_page_config(page_title="Tradebox Stock Tracker", layout="wide")
 # --- LOGO & HEADER ---
 st.markdown('''
 <style>
+.sw-header-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
 .sw-header-logo {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 0;
   margin-top: 8px;
 }
 .sw-refresh-btn {
@@ -67,17 +126,21 @@ st.markdown('''
   justify-content: center;
   border: none;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.2s, box-shadow 0.2s, transform 0.18s;
   margin-right: 2px;
+  box-shadow: 0 2px 8px #0002;
 }
 .sw-refresh-btn:hover {
   background: #38e38e;
+  box-shadow: 0 4px 16px #38e38e44;
+  transform: scale(1.08) rotate(-10deg);
 }
 .sw-refresh-icon {
   width: 28px;
   height: 28px;
   fill: #6ee26e;
   display: block;
+  transition: fill 0.2s;
 }
 .sw-logo-text {
   font-family: 'Segoe UI', 'Roboto', Arial, sans-serif;
@@ -103,27 +166,233 @@ st.markdown('''
   .sw-refresh-icon { width: 20px; height: 20px; }
 }
 </style>
-<div class="sw-header-logo">
-  <button class="sw-refresh-btn" onclick="window.location.reload()">
-    <svg class="sw-refresh-icon" viewBox="0 0 24 24">
-      <path d="M12 4V1L7 6l5 5V7c3.31 0 6 2.69 6 6 0 3.31-2.69 6-6 6s-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
-    </svg>
-  </button>
-  <span class="sw-logo-text">
-    <span class="sw-logo-stock">Stock</span>
-    <span class="sw-logo-watcher">Core</span>
-  </span>
+<div class="sw-header-row">
+  <div class="sw-header-logo">
+    <button class="sw-refresh-btn" onclick="window.location.reload()">
+      <svg class="sw-refresh-icon" viewBox="0 0 24 24">
+        <path d="M12 4V1L7 6l5 5V7c3.31 0 6 2.69 6 6 0 3.31-2.69 6-6 6s-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+      </svg>
+    </button>
+    <span class="sw-logo-text">
+      <span class="sw-logo-stock">Stock</span>
+      <span class="sw-logo-watcher">Core</span>
+    </span>
+  </div>
 </div>
 ''', unsafe_allow_html=True)
 
-# --- EN ÜSTTE NAVBAR: st.radio ile ---
-navbar_options = ["Home", "Market Movers", "News", "ETFs"]
+# --- MODERN SPINNER/SHIMMER ---
+spinner_css = '''<style>
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.shimmer {
+  height: 38px;
+  width: 100%;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #23272f 25%, #2e323a 50%, #23272f 75%);
+  background-size: 400px 100%;
+  animation: shimmer 1.2s infinite linear;
+  margin-bottom: 10px;
+}
+</style>'''
+
+# --- VIX GÖSTERGESİ ---
+def get_vix_value():
+    try:
+        vix = yf.Ticker('^VIX')
+        hist = vix.history(period="1d", interval="1m")
+        if not hist.empty:
+            return float(hist['Close'].iloc[-1])
+    except Exception:
+        pass
+    return None
+vix_val = get_vix_value()
+vix_color = '#6ee26e' if vix_val and vix_val < 15 else '#fbbc04' if vix_val and vix_val < 25 else '#d93025'
+vix_label = 'Calm' if vix_val and vix_val < 15 else 'Neutral' if vix_val and vix_val < 25 else 'Fear'
+vix_html = f'''
+<style>
+.vix-box {{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: #232c2f;
+  border-radius: 10px;
+  border: 1.5px solid #232;
+  box-shadow: 0 2px 8px #0002;
+  padding: 7px 18px 7px 12px;
+  font-size: 1.08em;
+  font-weight: 700;
+  color: {vix_color};
+  margin-left: 18px;
+  margin-bottom: 0;
+  margin-top: 0;
+}}
+.vix-dot {{
+  width: 13px; height: 13px; border-radius: 50%; background: {vix_color}; display: inline-block; margin-right: 2px;
+}}
+</style>
+<div class="vix-box">
+  <span class="vix-dot"></span>VIX: <span style="color:{vix_color}; margin-left:4px;">{vix_val:.2f}</span> <span style="color:#fff; font-size:0.97em; margin-left:7px;">{vix_label}</span>
+</div>
+''' if vix_val else ''
+
+# --- SEKTÖR HEATMAP (KOYU PASTEL, EN ALTA, BİTİŞİK) ---
+sector_heatmap_data = [
+    {"sector": "Tech", "change": 2.1},
+    {"sector": "Finance", "change": -1.3},
+    {"sector": "Healthcare", "change": 0.7},
+    {"sector": "Energy", "change": -0.9},
+    {"sector": "Consumer", "change": 1.5},
+    {"sector": "Utilities", "change": -0.2},
+]
+# Daha koyu pastel renkler
+sector_colors = lambda chg: '#234e3c' if chg > 1 else '#3a3a2e' if chg > 0 else '#4a2323' if chg < 0 else '#33343a'
+heatmap_html = '<div style="display:flex;gap:0;margin:0 0 0 0;flex-wrap:wrap;">'
+for i, s in enumerate(sector_heatmap_data):
+    color = sector_colors(s['change'])
+    sign = '+' if s['change'] > 0 else ''
+    left_radius = '10px' if i == 0 else '0'
+    right_radius = '10px' if i == len(sector_heatmap_data)-1 else '0'
+    heatmap_html += f'<div style="background:{color};color:#e0e0e0;font-weight:700;border-top-left-radius:{left_radius};border-bottom-left-radius:{left_radius};border-top-right-radius:{right_radius};border-bottom-right-radius:{right_radius};padding:10px 18px;min-width:90px;text-align:center;box-shadow:0 2px 8px #0001;font-size:1.08em;border-right:1.5px solid #232;">'
+    heatmap_html += f'<span style="color:#e0e0e0;font-weight:700;">{s["sector"]}</span><br>'
+    heatmap_html += f'<span style="font-size:0.97em;font-weight:700;color:#e0e0e0;">{sign}{s["change"]:.2f}%</span>'
+    heatmap_html += '</div>'
+heatmap_html += '</div>'
+
+# --- NAVBAR: StockCore altına ---
+navbar_options = ["Home", "Market Movers", "News", "ETFs", "Stock Heatmap"]
 selected_nav = st.radio("", navbar_options, horizontal=True, label_visibility="collapsed")
 
+# --- STOCK HEATMAP WIDGET ---
+if selected_nav == "Stock Heatmap":
+    st.subheader("Stock Heatmap (S&P 500)")
+    st.markdown("""
+    <div style="width:100%;height:600px;">
+    <iframe src="https://www.tradingview.com/widget/stock-heatmap/?dataSource=SPX500&grouping=sector&blockSize=market_cap_basic&blockColor=change&locale=en&colorTheme=dark&hasTopBar=false&isDataSetEnabled=false&isZoomEnabled=true&hasSymbolTooltip=true&isMonoSize=false" 
+    width="100%" height="600" frameborder="0" allowtransparency="true" scrolling="no" style="border-radius:12px;"></iframe>
+    </div>
+    """, unsafe_allow_html=True)
+
+# --- ECONOMIC EVENTS CARD (FULL WIDTH BANNER) + VIX ---
+css_econ_events = """
+<style>
+.econ-events-banner {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  background: linear-gradient(90deg, #23272f 80%, #263 100%);
+  border-radius: 10px;
+  border: 1.5px solid #232;
+  box-shadow: 0 2px 12px #0003;
+  padding: 8px 24px 8px 18px;
+  margin-bottom: 0;
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  height: 54px;
+}
+.econ-events-title {
+  font-size: 1.08em;
+  font-weight: 800;
+  color: #6ee26e;
+  margin-bottom: 0;
+  margin-right: 18px;
+  letter-spacing: -0.5px;
+  white-space: nowrap;
+}
+.econ-event-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 0;
+  font-size: 1em;
+  margin-right: 18px;
+  white-space: nowrap;
+}
+.econ-event-time {
+  color: #fbbc04;
+  font-weight: 700;
+  min-width: 38px;
+  font-size: 1em;
+}
+.econ-event-title {
+  color: #fff;
+  font-weight: 500;
+  font-size: 1em;
+}
+.econ-event-flag {
+  font-size: 1.13em;
+  margin-right: 2px;
+}
+@media (max-width: 900px) {
+  .econ-events-banner { flex-wrap: wrap; height: auto; padding: 10px 10px 10px 10px; gap: 10px; }
+  .econ-events-title { margin-bottom: 4px; margin-right: 10px; }
+  .econ-event-row { margin-bottom: 2px; margin-right: 10px; }
+}
+@media (max-width: 700px) {
+  .econ-events-banner { flex-direction: column; align-items: flex-start; min-width: 0; max-width: 100%; width: 100%; height: auto; padding: 8px 7px 8px 7px; }
+  .econ-events-title { font-size: 1em; margin-bottom: 2px; }
+  .econ-event-row { font-size: 0.97em; margin-bottom: 2px; }
+}
+</style>
+"""
+today_events = [
+    {"time": "15:30", "country": "🇺🇸", "title": "US Initial Jobless Claims"},
+    {"time": "17:00", "country": "🇪🇺", "title": "ECB Rate Decision"},
+    {"time": "18:00", "country": "🇬🇧", "title": "BoE Gov. Speech"},
+]
+econ_events_html = '<div class="econ-events-banner">'
+econ_events_html += '<div class="econ-events-title">Today\'s Major Economic Events</div>'
+for event in today_events:
+    econ_events_html += (
+        f'<div class="econ-event-row">'
+        f'<span class="econ-event-flag">{event["country"]}</span>'
+        f'<span class="econ-event-time">{event["time"]}</span>'
+        f'<span class="econ-event-title">{event["title"]}</span>'
+        f'</div>'
+    )
+if vix_html:
+    econ_events_html += vix_html
+
+st.markdown(css_econ_events, unsafe_allow_html=True)
+st.markdown(econ_events_html, unsafe_allow_html=True)
+
+# --- HEATMAP ANA SAYFADA ve ANA NAV BLOKLARI ---
 if selected_nav == "Home":
-    # --- ANA SAYFA İÇERİĞİ (Trade Ideas, ticker tape, ana tablo, news) ---
-    # ... mevcut ana sayfa kodunuz buraya gelsin ...
-    pass
+    # ... diğer ana sayfa içeriği ...
+    # Tabloyu ve diğer ana içerikleri burada bırak
+    # En alta heatmap başlığı ve kutuları ekle
+    st.markdown("""
+    <div style='margin-top:48px; margin-bottom:0;'>
+      <h3 style='margin-bottom:10px;color:#fff;font-weight:800;'>Sectoral Heatmaps</h3>
+      {heatmap}
+    </div>
+    """.replace('{heatmap}', heatmap_html), unsafe_allow_html=True)
+elif selected_nav == "News":
+    st.subheader('📰 Latest Market News')
+    feed_url = "https://news.google.com/rss/search?q=stock+market"
+    import feedparser
+    feed = feedparser.parse(feed_url)
+    if feed.entries:
+        for entry in feed.entries[:12]:
+            title = entry.title
+            link = entry.link
+            summary = entry.summary if hasattr(entry, 'summary') else ''
+            summary_short = summary[:110] + '...' if len(summary) > 110 else summary
+            parsed_url = urllib.parse.urlparse(link)
+            domain = parsed_url.netloc.replace('www.', '')
+            st.markdown(f"""
+            <div style='margin-bottom:18px;'>
+                <a href='{link}' target='_blank' style='font-size:1.08em;font-weight:700;color:#6ee26e;text-decoration:none;'>{title}</a><br>
+                <span style='font-size:0.97em;color:#888;'>{domain}</span><br>
+                <span style='font-size:0.97em;color:#b5b5b5;font-style:italic;'>{summary_short}</span>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No news found.")
 elif selected_nav == "Market Movers":
     st.subheader('Market Movers (US)')
     try:
@@ -230,42 +499,6 @@ elif selected_nav == "Market Movers":
             return ''
         styled = test_df.style.applymap(color_mover, subset=['Change %'])
         st.dataframe(styled, use_container_width=True, hide_index=True)
-elif selected_nav == "News":
-    st.subheader('📰 Latest Market News')
-    feed_url = "https://news.google.com/rss/search?q=stock+market"
-    feed = feedparser.parse(feed_url)
-    if feed.entries:
-        st.markdown("""
-        <style>
-        .news-card-minimal {background: rgba(255,255,255,0.01); border-radius: 7px; padding: 10px 0 10px 0; margin-bottom: 7px; border-bottom: 1px solid #eee;}
-        .news-title-minimal {font-size: 1.08em; font-weight: 700; color: #222; text-decoration: none; line-height: 1.3;}
-        .news-domain-row {display: flex; align-items: center; gap: 7px; margin-top: 2px;}
-        .news-domain-minimal {font-size: 0.97em; color: #888;}
-        .news-summary-minimal {font-size: 0.97em; color: #888; font-style: italic; margin-top: 2px;}
-        @media (prefers-color-scheme: dark) {
-          .news-card-minimal {background: rgba(30,32,36,0.01); border-bottom: 1px solid #333;}
-          .news-title-minimal {color: #fff;}
-        }
-        </style>
-        """, unsafe_allow_html=True)
-        for entry in feed.entries[:10]:
-            title = entry.title
-            link = entry.link
-            summary = entry.summary if hasattr(entry, 'summary') else ''
-            summary_short = summary[:80] + '...' if len(summary) > 80 else summary
-            parsed_url = urllib.parse.urlparse(link)
-            domain = parsed_url.netloc.replace('www.', '')
-            st.markdown(f"""
-            <div class='news-card-minimal'>
-                <a href='{link}' target='_blank' class='news-title-minimal'>{title}</a>
-                <div class='news-domain-row'>
-                    <span class='news-domain-minimal'>{domain}</span>
-                </div>
-                <div class='news-summary-minimal'>{summary_short}</div>
-            </div>
-            """, unsafe_allow_html=True)
-    else:
-        st.info("No news found.")
 elif selected_nav == "ETFs":
     st.subheader('Most Traded US ETFs')
     try:
@@ -669,6 +902,15 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Trade Ideas kartları için Analyst Rating örnek verisi (gerçek API ile entegre edilebilir)
+def get_analyst_rating():
+    # Gerçek API yoksa örnek: rastgele oranlar
+    buy = random.randint(40, 80)
+    hold = random.randint(10, 40)
+    sell = 100 - buy - hold
+    if sell < 0: sell = 0
+    return buy, hold, sell
+
 trade_ideas_boxes_html = ""
 for idea in trade_ideas:
     perf = idea.get("Performance")
@@ -902,4 +1144,36 @@ if 'GOOGL' in df_display.index and df_display.loc['GOOGL'].isnull().any():
 if 'Dow Jones' in index_prices and index_prices.get('Dow Jones') is None:
     st.warning("Dow Jones verisi alınamadı.")
 
-# ... rest of the file remains unchanged ... 
+# --- TRADINGVIEW WIDGET (EMBED) ---
+tradingview_css = """
+<style>
+.tradingview-widget-wrap { background: #23272f; border-radius: 12px; box-shadow: 0 2px 12px #0003; padding: 12px 10px 8px 10px; margin-bottom: 18px; }
+.tradingview-title { color: #fff; font-weight: 700; font-size: 1.08em; margin-bottom: 7px; }
+</style>
+"""
+tradingview_symbols = [
+    {"label": "NASDAQ 100", "value": "NASDAQ:NDX"},
+    {"label": "S&P 500", "value": "SP:SPX"},
+    {"label": "Dow Jones", "value": "DJ:DJI"},
+    {"label": "Russell 2000", "value": "CBOE:RU20"},
+    {"label": "Bitcoin", "value": "COINBASE:BTCUSD"},
+    {"label": "Ethereum", "value": "COINBASE:ETHUSD"},
+    {"label": "US10Y", "value": "TVC:US10Y"},
+]
+def get_tradingview_embed(symbol):
+    return f"""
+    <div class='tradingview-widget-wrap'>
+      <div class='tradingview-title'>Live Chart ({symbol})</div>
+      <iframe src='https://s.tradingview.com/widgetembed/?symbol={symbol}&interval=15&theme=dark&style=1&locale=en&utm_source=localhost&utm_medium=widget&utm_campaign=chart&utm_term={symbol}' width='100%' height='420' frameborder='0' allowtransparency='true' scrolling='no' style='border-radius:10px;'></iframe>
+    </div>
+    """
+if selected_nav == "Home":
+    st.markdown(tradingview_css, unsafe_allow_html=True)
+    tv_symbol_labels = [s['label'] for s in tradingview_symbols]
+    tv_symbol_map = {s['label']: s['value'] for s in tradingview_symbols}
+    tv_selected = st.selectbox("Select Symbol for Live Chart", tv_symbol_labels, index=0, key="tv_symbol")
+    tv_embed_html = get_tradingview_embed(tv_symbol_map[tv_selected])
+    st.markdown(tv_embed_html, unsafe_allow_html=True)
+
+# --- CNN FEAR & GREED INDEX (MARKET SENTIMENT) ---
+# (Bu bölümü kaldırdım) 
