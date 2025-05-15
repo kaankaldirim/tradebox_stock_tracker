@@ -140,41 +140,73 @@ if index_prices.get('Russell 2000') is None and index_prices.get('Russell 2000 E
     index_prices['Russell 2000'] = index_prices['Russell 2000 ETF']
     index_changes['Russell 2000'] = index_changes['Russell 2000 ETF']
 
-# --- Theme uyumlu başlık ve alt çizgi ---
+# --- MODERN DARK HEADER WITH SEARCH ---
 st.markdown("""
 <style>
-.header-title-modern {
-    font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
+body, .stApp {{
+    background: #111 !important;
+    color: #f3f3f3 !important;
+}}
+.header-title-modern {{
+    font-family: 'Montserrat', 'Segoe UI', Arial, sans-serif;
     font-size: 2.7em;
-    color: #222;
-    letter-spacing: 1.5px;
+    color: #fff;
+    letter-spacing: 2.2px;
     text-align: left;
-    font-weight: 700;
+    font-weight: 900;
     margin-bottom: 0.1em;
     margin-left: 10px;
-}
-@media (prefers-color-scheme: dark) {
-    .header-title-modern { color: #fff; }
-}
-.header-underline-modern {
-    width: 60%;
-    margin: 0 0 18px 10px;
-    border: 0;
-    border-top: 3px solid #444;
-    opacity: 0.7;
-}
+    text-shadow: 0 2px 12px #0008, 0 1px 0 #fff2;
+    display: flex;
+    align-items: center;
+}}
+.header-search-box {{
+    margin-left: 24px;
+    display: flex;
+    align-items: center;
+    background: #23272f;
+    border-radius: 8px;
+    padding: 4px 10px 4px 10px;
+    box-shadow: 0 2px 8px #0002;
+}}
+.header-search-input {{
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 1.1em;
+    outline: none;
+    width: 160px;
+    margin-left: 6px;
+}}
+.header-search-icon {{
+    color: #aaa;
+    font-size: 1.3em;
+    margin-right: 2px;
+}}
+@media (max-width: 700px) {{
+    .header-title-modern {{ font-size: 1.45em; margin-left: 2px; }}
+    .header-search-box {{ margin-left: 10px; padding: 2px 6px 2px 6px; }}
+    .header-search-input {{ font-size: 1em; width: 90px; }}
+}}
 </style>
-<div class="header-title-modern">
-  Tradebox Stock Tracker
+<div style="display:flex;align-items:center;justify-content:space-between;">
+  <div class="header-title-modern">
+    US Stock Tracker
+    <span class="header-search-box">
+      <span class="header-search-icon">🔍</span>
+      <input class="header-search-input" id="header-search-input" type="text" placeholder="Search..." />
+    </span>
+  </div>
 </div>
-<hr class="header-underline-modern">
+<hr class="header-underline-modern" style="border-top:2px solid #444;opacity:0.7;width:60%;margin:0 0 18px 10px;">
+<script>
+document.getElementById('header-search-input').addEventListener('keydown', function(e) {{
+  if (e.key === 'Enter') {{
+    window.parent.postMessage({{type: 'streamlit:setComponentValue', value: this.value}}, '*');
+  }}
+}});
+</script>
 """, unsafe_allow_html=True)
-
-# Only one centered Refresh Data button above the index cards
-st.markdown('<div style="display:flex;justify-content:center;margin-bottom:10px;">', unsafe_allow_html=True)
-if st.button("Refresh Data", help="Click to refresh all data immediately."):
-    st.cache_data.clear()
-st.markdown('</div>', unsafe_allow_html=True)
 
 # --- MODERN TICKER TAPE (SCROLLING INDEX BAR) ---
 ticker_items = []
@@ -199,15 +231,25 @@ st.markdown(f'''
 <style>
 .ticker-tape {{
   width: 100%;
-  overflow-x: auto;
-  white-space: nowrap;
+  overflow: hidden;
   background: rgba(30,32,36,0.85);
   border-radius: 10px;
   padding: 10px 0 10px 0;
   margin-bottom: 18px;
   font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
-  font-size: 1.13em;
+  font-size: 1.08em;
   box-shadow: 0 2px 8px #0002;
+  position: relative;
+  height: 44px;
+}}
+.ticker-tape-inner {{
+  display: inline-block;
+  white-space: nowrap;
+  animation: ticker-scroll 32s linear infinite;
+}}
+@keyframes ticker-scroll {{
+  0% {{ transform: translateX(100%); }}
+  100% {{ transform: translateX(-100%); }}
 }}
 .ticker-item {{
   display: inline-block;
@@ -215,8 +257,14 @@ st.markdown(f'''
   font-weight: 500;
   letter-spacing: 0.5px;
 }}
+@media (max-width: 700px) {{
+  .ticker-tape {{ font-size: 0.98em; padding: 7px 0 7px 0; height: 36px; }}
+  .ticker-item {{ margin: 0 14px 0 0; }}
+}}
 </style>
-<div class="ticker-tape">{ticker_tape_html}</div>
+<div class="ticker-tape">
+  <div class="ticker-tape-inner">{ticker_tape_html}</div>
+</div>
 ''', unsafe_allow_html=True)
 
 # --- TRADE IDEAS CENTERED BELOW INDEX BAR ---
