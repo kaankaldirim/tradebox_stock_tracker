@@ -561,8 +561,8 @@ def get_sparkline_base64(ticker):
         hist = yf.Ticker(ticker).history(period="1mo", interval="1d")['Close']
         if hist.empty:
             return ""
-        fig, ax = plt.subplots(figsize=(2.2, 0.7))
-        ax.plot(hist.values, color="#6ee26e", linewidth=2)
+        fig, ax = plt.subplots(figsize=(3.5, 0.9))
+        ax.plot(hist.values, color="#6ee26e", linewidth=2.5)
         ax.axis('off')
         plt.tight_layout(pad=0)
         buf = io.BytesIO()
@@ -570,29 +570,105 @@ def get_sparkline_base64(ticker):
         plt.close(fig)
         buf.seek(0)
         img_base64 = base64.b64encode(buf.read()).decode()
-        return f'<img src="data:image/png;base64,{img_base64}" style="height:38px;vertical-align:middle;margin-left:12px;" />'
+        return f'<img src="data:image/png;base64,{img_base64}" class="trade-idea-sparkline-img" />'
     except Exception:
         return ""
 
-# Mini candle chart for each trade idea
-def get_candle_base64(ticker):
-    try:
-        hist = yf.Ticker(ticker).history(period="1mo", interval="1d")
-        if hist.empty or len(hist) < 2:
-            return ""
-        fig, ax = plt.subplots(figsize=(2.2, 1.2))
-        mpf.plot(hist, type='candle', ax=ax, style='charles', xrotation=0, datetime_format='%d', tight_layout=True, show_nontrading=True)
-        ax.set_axis_off()
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png", bbox_inches='tight', pad_inches=0, transparent=True)
-        plt.close(fig)
-        buf.seek(0)
-        img_base64 = base64.b64encode(buf.read()).decode()
-        return f'<img src="data:image/png;base64,{img_base64}" style="height:54px;vertical-align:middle;margin-left:16px;" />'
-    except Exception:
-        return ""
+symbol_to_domain = {
+    "NVDA": "nvidia.com",
+    "MRVL": "marvell.com",
+    "AAL": "aa.com",
+    # Diğer semboller için domain ekleyebilirsin
+}
 
-# Show Trade Ideas boxes side by side (horizontally), left-aligned, with candle chart
+st.markdown("""
+<style>
+.trade-ideas-row-center {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px;
+    justify-content: flex-start;
+    margin-left: 0;
+    margin-top: 10px;
+}
+.trade-idea-box {
+    background: #23272f;
+    border-radius: 14px;
+    border: 1.5px solid #222;
+    box-shadow: 0 4px 24px #0005;
+    min-width: 260px;
+    max-width: 320px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 18px 16px 16px 16px;
+    margin-bottom: 0;
+    position: relative;
+    transition: box-shadow 0.2s;
+}
+.trade-idea-box:hover {
+    box-shadow: 0 8px 32px #0007;
+    border-color: #6ee26e;
+}
+.trade-idea-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.trade-idea-title {
+    font-size: 1.18em;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: #fff;
+}
+.trade-idea-logo-img {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    object-fit: contain;
+    background: #fff;
+    box-shadow: 0 2px 8px #0002;
+    display: inline-block;
+    vertical-align: middle;
+}
+.trade-idea-row { margin-bottom: 7px; font-size: 1em; }
+.trade-idea-label { color: #b5b5b5; font-size: 0.97em; }
+.trade-idea-perf-pos { color: #6ee26e; font-weight: bold; }
+.trade-idea-perf-neg { color: #ff5c5c; font-weight: bold; }
+.trade-idea-sparkline-img {
+  margin-left: 0;
+  margin-top: 10px;
+  height: 48px;
+  max-width: 100%;
+  width: 100%;
+  display: block;
+}
+@media (max-width: 900px) {
+  .trade-ideas-row-center { gap: 14px; }
+  .trade-idea-box { min-width: 0; max-width: 100%; }
+}
+@media (max-width: 700px) {
+  .trade-ideas-row-center {
+    flex-direction: column;
+    gap: 14px;
+    align-items: stretch;
+  }
+  .trade-idea-box {
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    margin-bottom: 0;
+    padding: 12px 7px 10px 7px;
+  }
+  .trade-idea-title { font-size: 1.05em; }
+  .trade-idea-row { font-size: 0.97em; }
+  .trade-idea-sparkline-img { height: 32px; margin-top: 8px; }
+}
+</style>
+""", unsafe_allow_html=True)
+
 trade_ideas_boxes_html = ""
 for idea in trade_ideas:
     perf = idea.get("Performance")
@@ -602,12 +678,14 @@ for idea in trade_ideas:
     curr_str = f"{idea.get('Current Price', 0):.2f}" if idea.get('Current Price') is not None else "N/A"
     stop_str = f"{idea.get('StopLoss', 0):.2f}" if idea.get('StopLoss') is not None else "N/A"
     tp_str = f"{idea.get('TakeProfit', 0):.2f}" if idea.get('TakeProfit') is not None else "N/A"
-    candle_img = get_candle_base64(idea['Ticker'])
+    sparkline_img = get_sparkline_base64(idea['Ticker'])
+    logo_url = f"https://logo.clearbit.com/{symbol_to_domain.get(idea['Ticker'], 'yahoo.com')}"
     trade_ideas_boxes_html += (
         f'<div class="trade-idea-box">'
-        f'<div class="trade-idea-content">'
-        f'<div>'
-        f'<div class="trade-idea-title">Trade Ideas</div>'
+        f'<div class="trade-idea-title-row">'
+        f'<img src="{logo_url}" class="trade-idea-logo-img" alt="{idea["Ticker"]} logo"/>'
+        f'<span class="trade-idea-title">Trade Ideas</span>'
+        f'</div>'
         f'<div class="trade-idea-row"><span class="trade-idea-label">Symbol:</span> {idea["Ticker"]}</div>'
         f'<div class="trade-idea-row"><span class="trade-idea-label">Action:</span> {idea["Type"]} ({idea["Date"]})</div>'
         f'<div class="trade-idea-row"><span class="trade-idea-label">Entry Price:</span> {price_str}</div>'
@@ -615,86 +693,11 @@ for idea in trade_ideas:
         f'<div class="trade-idea-row"><span class="trade-idea-label">Take Profit:</span> {tp_str}</div>'
         f'<div class="trade-idea-row"><span class="trade-idea-label">Current Price:</span> {curr_str}</div>'
         f'<div class="trade-idea-row"><span class="trade-idea-label">Performance:</span> <span class="{perf_class}">{perf_str}</span></div>'
-        f'</div>'
-        f'{candle_img}'
-        f'</div>'
+        f'{sparkline_img}'
         f'</div>'
     )
+
 st.markdown(f"""
-<style>
-/* Responsive container for trade ideas */
-.trade-ideas-row-center {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 20px;
-    justify-content: flex-start;
-    margin-left: 0;
-}}
-.trade-idea-box {{
-    background: linear-gradient(135deg, #23272f 60%, #1e7e34 100%);
-    border-radius: 16px;
-    padding: 16px 12px 12px 12px;
-    color: #fff;
-    box-shadow: 0 2px 12px #0003;
-    font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
-    min-width: 220px;
-    max-width: 320px;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    margin-bottom: 0;
-}}
-.trade-idea-content {{
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 0;
-    width: 100%;
-}}
-.trade-idea-title {{ font-size: 1.12em; font-weight: 700; margin-bottom: 8px; }}
-.trade-idea-row {{ margin-bottom: 7px; font-size: 1em; }}
-.trade-idea-label {{ color: #b5b5b5; font-size: 0.97em; }}
-.trade-idea-perf-pos {{ color: #6ee26e; font-weight: bold; }}
-.trade-idea-perf-neg {{ color: #ff5c5c; font-weight: bold; }}
-/* Endeks barı mobilde yatay scroll */
-.ticker-tape {{
-  width: 100%;
-  overflow-x: auto;
-  white-space: nowrap;
-  background: rgba(30,32,36,0.85);
-  border-radius: 10px;
-  padding: 10px 0 10px 0;
-  margin-bottom: 18px;
-  font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
-  font-size: 1.08em;
-  box-shadow: 0 2px 8px #0002;
-}}
-.ticker-item {{
-  display: inline-block;
-  margin: 0 18px 0 0;
-  font-weight: 500;
-  letter-spacing: 0.5px;
-}}
-/* Mobil uyumlu */
-@media (max-width: 700px) {{
-  .trade-ideas-row-center {{
-    flex-direction: column;
-    gap: 14px;
-    align-items: stretch;
-  }}
-  .trade-idea-box {{
-    min-width: 0;
-    max-width: 100%;
-    width: 100%;
-    margin-bottom: 0;
-    padding: 12px 7px 10px 7px;
-  }}
-  .trade-idea-title {{ font-size: 1.05em; }}
-  .trade-idea-row {{ font-size: 0.97em; }}
-  .ticker-tape {{ font-size: 0.98em; padding: 7px 0 7px 0; }}
-  .ticker-item {{ margin: 0 10px 0 0; }}
-}}
-</style>
 <div class="trade-ideas-row-center">
 {trade_ideas_boxes_html}
 </div>
