@@ -25,90 +25,196 @@ from io import StringIO
 
 st.set_page_config(page_title="Tradebox Stock Tracker", layout="wide")
 
-# --- YAHOO FINANCE TARZI NAVBAR ---
-if 'main_section' not in st.session_state:
-    st.session_state['main_section'] = 'Home'
+# --- EN ÜSTTE NAVBAR: st.radio ile ---
+navbar_options = ["Home", "Market Movers", "Economic Calendar", "ETFs"]
+selected_nav = st.radio("", navbar_options, horizontal=True, label_visibility="collapsed")
 
-st.markdown('''
-<style>
-.us-navbar {
-  width: 100%;
-  background: #181c1f;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 0 0 0;
-  border-bottom: 2.5px solid #1e7e34;
-  min-height: 54px;
-  position: sticky;
-  top: 0;
-  z-index: 100;
-}
-.us-navbar-left {
-  display: flex;
-  align-items: center;
-  margin-left: 24px;
-}
-.us-navbar-title {
-  font-family: 'Montserrat', 'Segoe UI', Arial, sans-serif;
-  font-size: 2.1em;
-  color: #fff;
-  font-weight: 900;
-  letter-spacing: 1.5px;
-  margin-right: 32px;
-  text-shadow: 0 2px 12px #0008, 0 1px 0 #fff2;
-}
-.us-navbar-menu {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  margin-right: 32px;
-}
-.us-navbar-link {
-  color: #fff;
-  font-size: 1.13em;
-  font-family: 'Montserrat', 'Segoe UI', Arial, sans-serif;
-  font-weight: 700;
-  text-decoration: none;
-  padding: 7px 18px 7px 18px;
-  border-radius: 7px;
-  transition: background 0.18s, color 0.18s;
-  cursor: pointer;
-}
-.us-navbar-link.selected, .us-navbar-link:hover {
-  background: linear-gradient(90deg, #1e7e34 60%, #23272f 100%);
-  color: #fff;
-}
-@media (max-width: 700px) {
-  .us-navbar-title { font-size: 1.18em; margin-right: 10px; }
-  .us-navbar-menu { gap: 7px; margin-right: 7px; }
-  .us-navbar-link { font-size: 0.98em; padding: 5px 8px 5px 8px; }
-  .us-navbar-left { margin-left: 7px; }
-}
-</style>
-<div class="us-navbar">
-  <div class="us-navbar-left">
-    <span class="us-navbar-title">US Stock Tracker</span>
-  </div>
-  <div class="us-navbar-menu">
-    <a class="us-navbar-link {sel0}" href="#" onclick="window.parent.postMessage({type: 'streamlit:setComponentValue', key: 'main_section', value: 'Home'}, '*');return false;">Home</a>
-    <a class="us-navbar-link {sel1}" href="#" onclick="window.parent.postMessage({type: 'streamlit:setComponentValue', key: 'main_section', value: 'Market Movers'}, '*');return false;">Market Movers</a>
-    <a class="us-navbar-link {sel2}" href="#" onclick="window.parent.postMessage({type: 'streamlit:setComponentValue', key: 'main_section', value: 'Economic Calendar'}, '*');return false;">Economic Calendar</a>
-    <a class="us-navbar-link {sel3}" href="#" onclick="window.parent.postMessage({type: 'streamlit:setComponentValue', key: 'main_section', value: 'ETFs'}, '*');return false;">ETFs</a>
-  </div>
-</div>
-<script>
-window.addEventListener('message', function(event) {
-  if (event.data && event.data.type === 'streamlit:setComponentValue') {
-    window.location.hash = event.data.value;
-    window.parent.postMessage({type: 'streamlit:setComponentValue', key: event.data.key, value: event.data.value}, '*');
-  }
-});
-</script>
-'''.replace('{sel0}', 'selected' if st.session_state['main_section']=='Home' else '').replace('{sel1}', 'selected' if st.session_state['main_section']=='Market Movers' else '').replace('{sel2}', 'selected' if st.session_state['main_section']=='Economic Calendar' else '').replace('{sel3}', 'selected' if st.session_state['main_section']=='ETFs' else ''), unsafe_allow_html=True)
-
-# --- NAVBAR KONTROLÜ ---
-section = st.session_state['main_section']
+if selected_nav == "Home":
+    # --- ANA SAYFA İÇERİĞİ (Trade Ideas, ticker tape, ana tablo, news) ---
+    # ... mevcut ana sayfa kodunuz buraya gelsin ...
+    pass
+elif selected_nav == "Market Movers":
+    st.subheader('Market Movers (US)')
+    try:
+        movers_tab = st.tabs(["Gainers", "Losers", "Actives"])
+        movers_types = ['gainers', 'losers', 'actives']
+        for i, tab in enumerate(movers_tab):
+            with tab:
+                df = get_yahoo_movers(movers_types[i])
+                if not df.empty:
+                    if '% Change' in df.columns:
+                        def color_mover(val):
+                            try:
+                                v = float(str(val).replace('%',''))
+                                if v > 0:
+                                    return 'color: #188038; font-weight: bold;'
+                                elif v < 0:
+                                    return 'color: #d93025; font-weight: bold;'
+                            except:
+                                pass
+                            return ''
+                        styled = df.style.applymap(color_mover, subset=['% Change'])
+                        st.dataframe(styled, use_container_width=True, hide_index=True)
+                    else:
+                        st.dataframe(df, use_container_width=True, hide_index=True)
+                else:
+                    st.warning("No data found. Showing example data.")
+                    test_df = pd.DataFrame({
+                        'Symbol': ['AAPL', 'MSFT'],
+                        'Change %': ['+2.5%', '-1.2%']
+                    })
+                    st.dataframe(test_df)
+    except Exception as e:
+        st.error(f"Error loading Market Movers: {e}")
+        test_df = pd.DataFrame({
+            'Symbol': ['AAPL', 'MSFT'],
+            'Change %': ['+2.5%', '-1.2%']
+        })
+        st.dataframe(test_df)
+elif selected_nav == "Economic Calendar":
+    st.subheader('Upcoming Major Economic Events')
+    try:
+        @st.cache_data(ttl=604800)
+        def fetch_economic_calendar():
+            url = "https://tradingeconomics.com/calendar"
+            headers = {"User-Agent": "Mozilla/5.0"}
+            r = requests.get(url, headers=headers, timeout=10)
+            soup = BeautifulSoup(r.text, "html.parser")
+            table = soup.find('table', {'id': 'calendar'})
+            if not table:
+                return pd.DataFrame()
+            rows = table.find_all('tr')
+            events = []
+            for row in rows:
+                cols = row.find_all('td')
+                if len(cols) >= 7:
+                    date = cols[0].text.strip()
+                    time = cols[1].text.strip()
+                    country = cols[2].text.strip()
+                    event = cols[3].text.strip()
+                    importance = cols[4].get('title', '').strip() if cols[4].get('title') else cols[4].text.strip()
+                    actual = cols[5].text.strip()
+                    forecast = cols[6].text.strip()
+                    previous = cols[7].text.strip() if len(cols) > 7 else ''
+                    if country in ['United States', 'Euro Area', 'Germany', 'United Kingdom', 'China', 'Japan']:
+                        events.append({
+                            "Date": date,
+                            "Time": time,
+                            "Country": country,
+                            "Event": event,
+                            "Actual": actual,
+                            "Forecast": forecast,
+                            "Previous": previous,
+                            "Importance": importance
+                        })
+            df = pd.DataFrame(events)
+            return df
+        econ_df = fetch_economic_calendar()
+        if not econ_df.empty:
+            def impact_color(val):
+                if 'high' in str(val).lower():
+                    return 'background-color: #d93025; color: #fff; font-weight: bold;'
+                elif 'medium' in str(val).lower():
+                    return 'background-color: #fbbc04; color: #222; font-weight: bold;'
+                elif 'low' in str(val).lower():
+                    return 'background-color: #6ee26e; color: #222; font-weight: bold;'
+                else:
+                    return ''
+            styled = econ_df.style.applymap(impact_color, subset=['Importance'])
+            st.dataframe(styled, use_container_width=True, hide_index=True)
+        else:
+            st.warning("No economic events found. Showing example data.")
+            test_econ = pd.DataFrame({
+                'Date': ['2025-05-15', '2025-05-16'],
+                'Time': ['15:30', '17:00'],
+                'Country': ['United States', 'Euro Area'],
+                'Event': ['US Initial Jobless Claims', 'ECB Rate Decision'],
+                'Actual': ['-', '-'],
+                'Forecast': ['220K', '4.50%'],
+                'Previous': ['231K', '4.25%'],
+                'Importance': ['High', 'High']
+            })
+            st.dataframe(test_econ)
+    except Exception as e:
+        st.error(f"Error loading Economic Calendar: {e}")
+        test_econ = pd.DataFrame({
+            'Date': ['2025-05-15', '2025-05-16'],
+            'Time': ['15:30', '17:00'],
+            'Country': ['United States', 'Euro Area'],
+            'Event': ['US Initial Jobless Claims', 'ECB Rate Decision'],
+            'Actual': ['-', '-'],
+            'Forecast': ['220K', '4.50%'],
+            'Previous': ['231K', '4.25%'],
+            'Importance': ['High', 'High']
+        })
+        st.dataframe(test_econ)
+elif selected_nav == "ETFs":
+    st.subheader('Most Traded US ETFs')
+    try:
+        etf_list = [
+            {"Symbol": "SPY", "Name": "SPDR S&P 500 ETF Trust"},
+            {"Symbol": "QQQ", "Name": "Invesco QQQ Trust"},
+            {"Symbol": "IWM", "Name": "iShares Russell 2000 ETF"},
+            {"Symbol": "VTI", "Name": "Vanguard Total Stock Market ETF"},
+            {"Symbol": "DIA", "Name": "SPDR Dow Jones Industrial Average ETF Trust"},
+            {"Symbol": "GLD", "Name": "SPDR Gold Shares"},
+            {"Symbol": "TLT", "Name": "iShares 20+ Year Treasury Bond ETF"},
+            {"Symbol": "XLF", "Name": "Financial Select Sector SPDR Fund"},
+            {"Symbol": "XLE", "Name": "Energy Select Sector SPDR Fund"},
+            {"Symbol": "XLY", "Name": "Consumer Discretionary Select Sector SPDR Fund"},
+            {"Symbol": "XLC", "Name": "Communication Services Select Sector SPDR Fund"},
+            {"Symbol": "XLI", "Name": "Industrial Select Sector SPDR Fund"},
+            {"Symbol": "XLV", "Name": "Health Care Select Sector SPDR Fund"},
+            {"Symbol": "ARKK", "Name": "ARK Innovation ETF"},
+            {"Symbol": "EEM", "Name": "iShares MSCI Emerging Markets ETF"},
+        ]
+        etf_df = pd.DataFrame(etf_list)
+        def get_etf_data(symbol):
+            try:
+                t = yf.Ticker(symbol)
+                hist = t.history(period="1d", interval="1m")
+                last_price = hist['Close'].iloc[-1] if not hist.empty else None
+                change = None
+                if not hist.empty and len(hist) > 1:
+                    prev = hist['Close'].iloc[0]
+                    change = ((last_price - prev) / prev) * 100 if prev else None
+                volume = hist['Volume'].iloc[-1] if not hist.empty else None
+                return last_price, change, volume
+            except:
+                return None, None, None
+        import time as _time
+        etf_df['Last Price'] = None
+        etf_df['% Change'] = None
+        etf_df['Volume'] = None
+        for i, row in etf_df.iterrows():
+            price, chg, vol = get_etf_data(row['Symbol'])
+            etf_df.at[i, 'Last Price'] = f"{price:,.2f}" if price is not None else "-"
+            etf_df.at[i, '% Change'] = f"{chg:+.2f}%" if chg is not None else "-"
+            etf_df.at[i, 'Volume'] = f"{int(vol):,}" if vol is not None else "-"
+            _time.sleep(0.1)
+        def etf_color(val):
+            try:
+                v = float(str(val).replace('%',''))
+                if v > 0:
+                    return 'color: #188038; font-weight: bold;'
+                elif v < 0:
+                    return 'color: #d93025; font-weight: bold;'
+            except:
+                pass
+            return ''
+        styled = etf_df.style.applymap(etf_color, subset=['% Change'])
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+    except Exception as e:
+        st.error(f"Error loading ETFs: {e}")
+        test_etf = pd.DataFrame({
+            'Symbol': ['SPY', 'QQQ'],
+            'Name': ['SPDR S&P 500 ETF Trust', 'Invesco QQQ Trust'],
+            'Last Price': ['512.34', '432.10'],
+            '% Change': ['+0.45%', '-0.12%'],
+            'Volume': ['45,000,000', '38,000,000']
+        })
+        st.dataframe(test_etf)
+# ... existing code ...
 
 # Ticker list (move this up before async scraping)
 tickers = [
@@ -548,13 +654,20 @@ def color_pnl(val):
 def fetch_ticker_data(ticker_symbol, last_official_close):
     try:
         ticker_obj = yf.Ticker(ticker_symbol)
-        info = ticker_obj.fast_info
+        # Previous close: her zaman bir önceki günün kapanışı
+        daily_hist = ticker_obj.history(period="2d", interval="1d")['Close']
+        if len(daily_hist) >= 2:
+            prev_close = daily_hist.iloc[-2]
+        else:
+            prev_close = None
+        # Last price: gün içi son fiyat
         hist = ticker_obj.history(period="1d", interval="1m")
         last_price = hist['Close'].iloc[-1] if not hist.empty else None
-        if pd.notnull(last_price) and pd.notnull(last_official_close) and last_official_close != 0:
-            last_price_change = ((last_price - last_official_close) / last_official_close) * 100
+        if pd.notnull(last_price) and pd.notnull(prev_close) and prev_close != 0:
+            last_price_change = ((last_price - prev_close) / prev_close) * 100
         else:
             last_price_change = None
+        # Pre-market price: prepost ile alınan en son pre-market fiyat
         us_eastern = pytz.timezone('US/Eastern')
         pre_hist = ticker_obj.history(period="2d", interval="1m", prepost=True)
         pre_market_price = None
@@ -566,10 +679,11 @@ def fetch_ticker_data(ticker_symbol, last_official_close):
                     pre_market_price = row['Close']
                     pre_market_ts = ts_est
                     break
-        if pre_market_price is not None and last_official_close is not None and last_official_close != 0:
-            pre_market_change = ((pre_market_price - last_official_close) / last_official_close) * 100
+        if pre_market_price is not None and prev_close is not None and prev_close != 0:
+            pre_market_change = ((pre_market_price - prev_close) / prev_close) * 100
         else:
             pre_market_change = None
+        info = ticker_obj.fast_info
         market_cap = info.get('marketCap', None)
         pe = info.get('pe_ratio', None)
         if pe is None:
@@ -726,210 +840,6 @@ def remove_week_caption():
 # (Bu bölümü tamamen kaldır)
 
 # --- Market Movers veri çekme fonksiyonu ---
-@lru_cache(maxsize=3)
-def get_yahoo_movers(mover_type):
-    url_map = {
-        'gainers': 'https://finance.yahoo.com/screener/predefined/day_gainers',
-        'losers': 'https://finance.yahoo.com/screener/predefined/day_losers',
-        'actives': 'https://finance.yahoo.com/screener/predefined/most_actives',
-    }
-    url = url_map[mover_type]
-    headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(url, headers=headers, timeout=10)
-    soup = BeautifulSoup(r.text, "html.parser")
-    table = soup.find('table')
-    if not table:
-        return pd.DataFrame()
-    df = pd.read_html(StringIO(str(table)))[0]
-    df = df.head(15)
-    return df
+# (Bu bölümü tamamen kaldır)
 
-# --- NAVBAR KONTROLÜ ---
-section = st.session_state['main_section']
-
-if section == 'Home':
-    # --- ANA SAYFA İÇERİĞİ (Trade Ideas, ticker tape, ana tablo, news) ---
-    # ... mevcut ana sayfa kodunuz buraya gelsin ...
-    pass
-elif section == 'Market Movers':
-    st.subheader('Market Movers (US)')
-    try:
-        movers_tab = st.tabs(["Gainers", "Losers", "Actives"])
-        movers_types = ['gainers', 'losers', 'actives']
-        for i, tab in enumerate(movers_tab):
-            with tab:
-                df = get_yahoo_movers(movers_types[i])
-                if not df.empty:
-                    if '% Change' in df.columns:
-                        def color_mover(val):
-                            try:
-                                v = float(str(val).replace('%',''))
-                                if v > 0:
-                                    return 'color: #188038; font-weight: bold;'
-                                elif v < 0:
-                                    return 'color: #d93025; font-weight: bold;'
-                            except:
-                                pass
-                            return ''
-                        styled = df.style.applymap(color_mover, subset=['% Change'])
-                        st.dataframe(styled, use_container_width=True, hide_index=True)
-                    else:
-                        st.dataframe(df, use_container_width=True, hide_index=True)
-                else:
-                    st.warning("No data found. Showing example data.")
-                    test_df = pd.DataFrame({
-                        'Symbol': ['AAPL', 'MSFT'],
-                        'Change %': ['+2.5%', '-1.2%']
-                    })
-                    st.dataframe(test_df)
-    except Exception as e:
-        st.error(f"Error loading Market Movers: {e}")
-        test_df = pd.DataFrame({
-            'Symbol': ['AAPL', 'MSFT'],
-            'Change %': ['+2.5%', '-1.2%']
-        })
-        st.dataframe(test_df)
-elif section == 'Economic Calendar':
-    st.subheader('Upcoming Major Economic Events')
-    try:
-        @st.cache_data(ttl=604800)
-        def fetch_economic_calendar():
-            url = "https://tradingeconomics.com/calendar"
-            headers = {"User-Agent": "Mozilla/5.0"}
-            r = requests.get(url, headers=headers, timeout=10)
-            soup = BeautifulSoup(r.text, "html.parser")
-            table = soup.find('table', {'id': 'calendar'})
-            if not table:
-                return pd.DataFrame()
-            rows = table.find_all('tr')
-            events = []
-            for row in rows:
-                cols = row.find_all('td')
-                if len(cols) >= 7:
-                    date = cols[0].text.strip()
-                    time = cols[1].text.strip()
-                    country = cols[2].text.strip()
-                    event = cols[3].text.strip()
-                    importance = cols[4].get('title', '').strip() if cols[4].get('title') else cols[4].text.strip()
-                    actual = cols[5].text.strip()
-                    forecast = cols[6].text.strip()
-                    previous = cols[7].text.strip() if len(cols) > 7 else ''
-                    if country in ['United States', 'Euro Area', 'Germany', 'United Kingdom', 'China', 'Japan']:
-                        events.append({
-                            "Date": date,
-                            "Time": time,
-                            "Country": country,
-                            "Event": event,
-                            "Actual": actual,
-                            "Forecast": forecast,
-                            "Previous": previous,
-                            "Importance": importance
-                        })
-            df = pd.DataFrame(events)
-            return df
-        econ_df = fetch_economic_calendar()
-        if not econ_df.empty:
-            def impact_color(val):
-                if 'high' in str(val).lower():
-                    return 'background-color: #d93025; color: #fff; font-weight: bold;'
-                elif 'medium' in str(val).lower():
-                    return 'background-color: #fbbc04; color: #222; font-weight: bold;'
-                elif 'low' in str(val).lower():
-                    return 'background-color: #6ee26e; color: #222; font-weight: bold;'
-                else:
-                    return ''
-            styled = econ_df.style.applymap(impact_color, subset=['Importance'])
-            st.dataframe(styled, use_container_width=True, hide_index=True)
-        else:
-            st.warning("No economic events found. Showing example data.")
-            test_econ = pd.DataFrame({
-                'Date': ['2025-05-15', '2025-05-16'],
-                'Time': ['15:30', '17:00'],
-                'Country': ['United States', 'Euro Area'],
-                'Event': ['US Initial Jobless Claims', 'ECB Rate Decision'],
-                'Actual': ['-', '-'],
-                'Forecast': ['220K', '4.50%'],
-                'Previous': ['231K', '4.25%'],
-                'Importance': ['High', 'High']
-            })
-            st.dataframe(test_econ)
-    except Exception as e:
-        st.error(f"Error loading Economic Calendar: {e}")
-        test_econ = pd.DataFrame({
-            'Date': ['2025-05-15', '2025-05-16'],
-            'Time': ['15:30', '17:00'],
-            'Country': ['United States', 'Euro Area'],
-            'Event': ['US Initial Jobless Claims', 'ECB Rate Decision'],
-            'Actual': ['-', '-'],
-            'Forecast': ['220K', '4.50%'],
-            'Previous': ['231K', '4.25%'],
-            'Importance': ['High', 'High']
-        })
-        st.dataframe(test_econ)
-elif section == 'ETFs':
-    st.subheader('Most Traded US ETFs')
-    try:
-        etf_list = [
-            {"Symbol": "SPY", "Name": "SPDR S&P 500 ETF Trust"},
-            {"Symbol": "QQQ", "Name": "Invesco QQQ Trust"},
-            {"Symbol": "IWM", "Name": "iShares Russell 2000 ETF"},
-            {"Symbol": "VTI", "Name": "Vanguard Total Stock Market ETF"},
-            {"Symbol": "DIA", "Name": "SPDR Dow Jones Industrial Average ETF Trust"},
-            {"Symbol": "GLD", "Name": "SPDR Gold Shares"},
-            {"Symbol": "TLT", "Name": "iShares 20+ Year Treasury Bond ETF"},
-            {"Symbol": "XLF", "Name": "Financial Select Sector SPDR Fund"},
-            {"Symbol": "XLE", "Name": "Energy Select Sector SPDR Fund"},
-            {"Symbol": "XLY", "Name": "Consumer Discretionary Select Sector SPDR Fund"},
-            {"Symbol": "XLC", "Name": "Communication Services Select Sector SPDR Fund"},
-            {"Symbol": "XLI", "Name": "Industrial Select Sector SPDR Fund"},
-            {"Symbol": "XLV", "Name": "Health Care Select Sector SPDR Fund"},
-            {"Symbol": "ARKK", "Name": "ARK Innovation ETF"},
-            {"Symbol": "EEM", "Name": "iShares MSCI Emerging Markets ETF"},
-        ]
-        etf_df = pd.DataFrame(etf_list)
-        def get_etf_data(symbol):
-            try:
-                t = yf.Ticker(symbol)
-                hist = t.history(period="1d", interval="1m")
-                last_price = hist['Close'].iloc[-1] if not hist.empty else None
-                change = None
-                if not hist.empty and len(hist) > 1:
-                    prev = hist['Close'].iloc[0]
-                    change = ((last_price - prev) / prev) * 100 if prev else None
-                volume = hist['Volume'].iloc[-1] if not hist.empty else None
-                return last_price, change, volume
-            except:
-                return None, None, None
-        import time as _time
-        etf_df['Last Price'] = None
-        etf_df['% Change'] = None
-        etf_df['Volume'] = None
-        for i, row in etf_df.iterrows():
-            price, chg, vol = get_etf_data(row['Symbol'])
-            etf_df.at[i, 'Last Price'] = f"{price:,.2f}" if price is not None else "-"
-            etf_df.at[i, '% Change'] = f"{chg:+.2f}%" if chg is not None else "-"
-            etf_df.at[i, 'Volume'] = f"{int(vol):,}" if vol is not None else "-"
-            _time.sleep(0.1)
-        def etf_color(val):
-            try:
-                v = float(str(val).replace('%',''))
-                if v > 0:
-                    return 'color: #188038; font-weight: bold;'
-                elif v < 0:
-                    return 'color: #d93025; font-weight: bold;'
-            except:
-                pass
-            return ''
-        styled = etf_df.style.applymap(etf_color, subset=['% Change'])
-        st.dataframe(styled, use_container_width=True, hide_index=True)
-    except Exception as e:
-        st.error(f"Error loading ETFs: {e}")
-        test_etf = pd.DataFrame({
-            'Symbol': ['SPY', 'QQQ'],
-            'Name': ['SPDR S&P 500 ETF Trust', 'Invesco QQQ Trust'],
-            'Last Price': ['512.34', '432.10'],
-            '% Change': ['+0.45%', '-0.12%'],
-            'Volume': ['45,000,000', '38,000,000']
-        })
-        st.dataframe(test_etf)
-# ... existing code ... 
+# ... rest of the file remains unchanged ... 
