@@ -328,36 +328,78 @@ for idea in trade_ideas:
     )
 st.markdown(f"""
 <style>
+/* Responsive container for trade ideas */
 .trade-ideas-row-center {{
     display: flex;
-    justify-content: flex-start;
-    gap: 32px;
     flex-wrap: wrap;
+    gap: 20px;
+    justify-content: flex-start;
     margin-left: 0;
 }}
 .trade-idea-box {{
     background: linear-gradient(135deg, #23272f 60%, #1e7e34 100%);
     border-radius: 16px;
-    padding: 18px 16px 14px 16px;
+    padding: 16px 12px 12px 12px;
     color: #fff;
     box-shadow: 0 2px 12px #0003;
     font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
-    min-width: 260px;
+    min-width: 220px;
     max-width: 320px;
+    width: 100%;
     display: flex;
     align-items: center;
+    margin-bottom: 0;
 }}
 .trade-idea-content {{
     display: flex;
     flex-direction: row;
     align-items: center;
     gap: 0;
+    width: 100%;
 }}
-.trade-idea-title {{ font-size: 1.18em; font-weight: 700; margin-bottom: 8px; }}
-.trade-idea-row {{ margin-bottom: 7px; }}
-.trade-idea-label {{ color: #b5b5b5; font-size: 0.98em; }}
+.trade-idea-title {{ font-size: 1.12em; font-weight: 700; margin-bottom: 8px; }}
+.trade-idea-row {{ margin-bottom: 7px; font-size: 1em; }}
+.trade-idea-label {{ color: #b5b5b5; font-size: 0.97em; }}
 .trade-idea-perf-pos {{ color: #6ee26e; font-weight: bold; }}
 .trade-idea-perf-neg {{ color: #ff5c5c; font-weight: bold; }}
+/* Endeks barı mobilde yatay scroll */
+.ticker-tape {{
+  width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+  background: rgba(30,32,36,0.85);
+  border-radius: 10px;
+  padding: 10px 0 10px 0;
+  margin-bottom: 18px;
+  font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
+  font-size: 1.08em;
+  box-shadow: 0 2px 8px #0002;
+}}
+.ticker-item {{
+  display: inline-block;
+  margin: 0 18px 0 0;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}}
+/* Mobil uyumlu */
+@media (max-width: 700px) {{
+  .trade-ideas-row-center {{
+    flex-direction: column;
+    gap: 14px;
+    align-items: stretch;
+  }}
+  .trade-idea-box {{
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    margin-bottom: 0;
+    padding: 12px 7px 10px 7px;
+  }}
+  .trade-idea-title {{ font-size: 1.05em; }}
+  .trade-idea-row {{ font-size: 0.97em; }}
+  .ticker-tape {{ font-size: 0.98em; padding: 7px 0 7px 0; }}
+  .ticker-item {{ margin: 0 10px 0 0; }}
+}}
 </style>
 <div class="trade-ideas-row-center">
 {trade_ideas_boxes_html}
