@@ -22,11 +22,194 @@ import mplfinance as mpf
 from functools import lru_cache
 import json
 from io import StringIO
+import calendar
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
+
+# --- Market Movers veri çekme fonksiyonu ---
+@lru_cache(maxsize=3)
+def get_yahoo_movers(mover_type):
+    url_map = {
+        'gainers': 'https://finance.yahoo.com/screener/predefined/day_gainers',
+        'losers': 'https://finance.yahoo.com/screener/predefined/day_losers',
+        'actives': 'https://finance.yahoo.com/screener/predefined/most_actives',
+    }
+    url = url_map[mover_type]
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(url, headers=headers, timeout=10)
+    soup = BeautifulSoup(r.text, "html.parser")
+    table = soup.find('table')
+    if not table:
+        return pd.DataFrame()
+    df = pd.read_html(StringIO(str(table)))[0]
+    df = df.head(15)
+    return df
+
+# --- Economic Calendar veri çekme fonksiyonu ---
+@st.cache_data(ttl=604800)
+def fetch_economic_calendar():
+    url = "https://tradingeconomics.com/calendar"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(url, headers=headers, timeout=10)
+    soup = BeautifulSoup(r.text, "html.parser")
+    table = soup.find('table', {'id': 'calendar'})
+    if not table:
+        return pd.DataFrame()
+    rows = table.find_all('tr')
+    events = []
+    for row in rows:
+        cols = row.find_all('td')
+        if len(cols) >= 7:
+            date = cols[0].text.strip()
+            time = cols[1].text.strip()
+            country = cols[2].text.strip()
+            event = cols[3].text.strip()
+            importance = cols[4].get('title', '').strip() if cols[4].get('title') else cols[4].text.strip()
+            actual = cols[5].text.strip()
+            forecast = cols[6].text.strip()
+            previous = cols[7].text.strip() if len(cols) > 7 else ''
+            if country in ['United States', 'Euro Area', 'Germany', 'United Kingdom', 'China', 'Japan']:
+                events.append({
+                    "Date": date,
+                    "Time": time,
+                    "Country": country,
+                    "Event": event,
+                    "Actual": actual,
+                    "Forecast": forecast,
+                    "Previous": previous,
+                    "Importance": importance
+                })
+    df = pd.DataFrame(events)
+    return df
+
+# --- Investing.com ekonomik takvim scraping fonksiyonu (Selenium ile) ---
+def fetch_investing_economic_calendar(year, month):
+    from bs4 import BeautifulSoup
+    import pandas as pd
+    from datetime import datetime
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    driver.get("https://www.investing.com/economic-calendar/")
+    driver.implicitly_wait(10)
+    html = driver.page_source
+    driver.quit()
+    soup = BeautifulSoup(html, "html.parser")
+    table = soup.find('table', {'id': 'economicCalendarData'})
+    if not table:
+        return pd.DataFrame()
+    events = []
+    for row in table.find_all('tr', {'class': 'js-event-item'}):
+        try:
+            ts = row.get('data-event-datetime')
+            if not ts:
+                continue
+            dt = datetime.fromtimestamp(int(ts))
+            if dt.year != year or dt.month != month:
+                continue
+            date = dt.strftime('%Y-%m-%d')
+            time = dt.strftime('%H:%M')
+            tds = row.find_all('td')
+            country = tds[1].find('span', {'title': True})['title'] if tds[1].find('span', {'title': True}) else ''
+            event = tds[2].get_text(strip=True)
+            imp_td = tds[3]
+            n_bulls = len(imp_td.find_all('i', {'class': 'grayFullBullishIcon'}))
+            importance = 'High' if n_bulls == 3 else 'Medium' if n_bulls == 2 else 'Low'
+            actual = tds[4].get_text(strip=True)
+            forecast = tds[5].get_text(strip=True)
+            previous = tds[6].get_text(strip=True)
+            events.append({
+                'Date': date,
+                'Time': time,
+                'Country': country,
+                'Event': event,
+                'Actual': actual,
+                'Forecast': forecast,
+                'Previous': previous,
+                'Importance': importance
+            })
+        except Exception:
+            continue
+    df = pd.DataFrame(events)
+    return df.reset_index(drop=True)
 
 st.set_page_config(page_title="Tradebox Stock Tracker", layout="wide")
 
+# --- LOGO & HEADER ---
+st.markdown('''
+<style>
+.sw-header-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  margin-top: 8px;
+}
+.sw-refresh-btn {
+  width: 44px;
+  height: 44px;
+  background: #232;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-right: 2px;
+}
+.sw-refresh-btn:hover {
+  background: #38e38e;
+}
+.sw-refresh-icon {
+  width: 28px;
+  height: 28px;
+  fill: #6ee26e;
+  display: block;
+}
+.sw-logo-text {
+  font-family: 'Segoe UI', 'Roboto', Arial, sans-serif;
+  font-size: 2.1em;
+  font-weight: 800;
+  letter-spacing: -1px;
+  display: flex;
+  align-items: center;
+}
+.sw-logo-stock {
+  color: #fff;
+  font-weight: 800;
+}
+.sw-logo-watcher {
+  color: #6ee26e;
+  font-weight: 800;
+  margin-left: 2px;
+  position: relative;
+}
+@media (max-width: 700px) {
+  .sw-header-logo { font-size: 1.2em; }
+  .sw-refresh-btn { width: 32px; height: 32px; }
+  .sw-refresh-icon { width: 20px; height: 20px; }
+}
+</style>
+<div class="sw-header-logo">
+  <button class="sw-refresh-btn" onclick="window.location.reload()">
+    <svg class="sw-refresh-icon" viewBox="0 0 24 24">
+      <path d="M12 4V1L7 6l5 5V7c3.31 0 6 2.69 6 6 0 3.31-2.69 6-6 6s-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+    </svg>
+  </button>
+  <span class="sw-logo-text">
+    <span class="sw-logo-stock">Stock</span>
+    <span class="sw-logo-watcher">Core</span>
+  </span>
+</div>
+''', unsafe_allow_html=True)
+
 # --- EN ÜSTTE NAVBAR: st.radio ile ---
-navbar_options = ["Home", "Market Movers", "Economic Calendar", "ETFs"]
+navbar_options = ["Home", "Market Movers", "News", "ETFs"]
 selected_nav = st.radio("", navbar_options, horizontal=True, label_visibility="collapsed")
 
 if selected_nav == "Home":
@@ -42,10 +225,54 @@ elif selected_nav == "Market Movers":
             with tab:
                 df = get_yahoo_movers(movers_types[i])
                 if not df.empty:
-                    if '% Change' in df.columns:
+                    df = df.reset_index(drop=True)  # Index sütununu kaldır
+                    if 'Unnamed: 0' in df.columns:
+                        df = df.drop(columns=['Unnamed: 0'])
+                    # Sade ve okunaklı sayı formatı uygula
+                    for col in df.columns:
+                        if any(x in col.lower() for x in ['price', 'change', 'close', 'open', 'low', 'high']):
+                            try:
+                                df[col] = df[col].apply(lambda x: f"{float(str(x).replace(',','')):,.2f}" if pd.notnull(x) and str(x).replace('.','',1).replace('-','',1).replace(',','').replace('%','').isdigit() else x)
+                            except Exception:
+                                pass
+                        if 'volume' in col.lower():
+                            def fmt_vol(val):
+                                try:
+                                    v = float(str(val).replace(',',''))
+                                    if v >= 1e9:
+                                        return f"{v/1e9:.2f}B"
+                                    elif v >= 1e6:
+                                        return f"{v/1e6:.2f}M"
+                                    elif v >= 1e3:
+                                        return f"{v/1e3:.2f}K"
+                                    else:
+                                        return f"{v:.0f}"
+                                except:
+                                    return val
+                            df[col] = df[col].apply(fmt_vol)
+                        if 'market cap' in col.lower():
+                            def fmt_mc(val):
+                                try:
+                                    v = float(str(val).replace(',',''))
+                                    if v >= 1e9:
+                                        return f"{v/1e9:.2f}B"
+                                    elif v >= 1e6:
+                                        return f"{v/1e6:.2f}M"
+                                    else:
+                                        return f"{v:.0f}"
+                                except:
+                                    return val
+                            df[col] = df[col].apply(fmt_mc)
+                    # Hangi sütun varsa onu renklendir
+                    change_col = None
+                    for col in ['% Change', 'Change %']:
+                        if col in df.columns:
+                            change_col = col
+                            break
+                    if change_col:
                         def color_mover(val):
                             try:
-                                v = float(str(val).replace('%',''))
+                                v = float(str(val).replace('%','').replace(',',''))
                                 if v > 0:
                                     return 'color: #188038; font-weight: bold;'
                                 elif v < 0:
@@ -53,7 +280,7 @@ elif selected_nav == "Market Movers":
                             except:
                                 pass
                             return ''
-                        styled = df.style.applymap(color_mover, subset=['% Change'])
+                        styled = df.style.applymap(color_mover, subset=[change_col])
                         st.dataframe(styled, use_container_width=True, hide_index=True)
                     else:
                         st.dataframe(df, use_container_width=True, hide_index=True)
@@ -63,91 +290,74 @@ elif selected_nav == "Market Movers":
                         'Symbol': ['AAPL', 'MSFT'],
                         'Change %': ['+2.5%', '-1.2%']
                     })
-                    st.dataframe(test_df)
+                    test_df = test_df.reset_index(drop=True)
+                    def color_mover(val):
+                        try:
+                            v = float(str(val).replace('%','').replace(',',''))
+                            if v > 0:
+                                return 'color: #188038; font-weight: bold;'
+                            elif v < 0:
+                                return 'color: #d93025; font-weight: bold;'
+                        except:
+                            pass
+                        return ''
+                    styled = test_df.style.applymap(color_mover, subset=['Change %'])
+                    st.dataframe(styled, use_container_width=True, hide_index=True)
     except Exception as e:
         st.error(f"Error loading Market Movers: {e}")
         test_df = pd.DataFrame({
             'Symbol': ['AAPL', 'MSFT'],
             'Change %': ['+2.5%', '-1.2%']
         })
-        st.dataframe(test_df)
-elif selected_nav == "Economic Calendar":
-    st.subheader('Upcoming Major Economic Events')
-    try:
-        @st.cache_data(ttl=604800)
-        def fetch_economic_calendar():
-            url = "https://tradingeconomics.com/calendar"
-            headers = {"User-Agent": "Mozilla/5.0"}
-            r = requests.get(url, headers=headers, timeout=10)
-            soup = BeautifulSoup(r.text, "html.parser")
-            table = soup.find('table', {'id': 'calendar'})
-            if not table:
-                return pd.DataFrame()
-            rows = table.find_all('tr')
-            events = []
-            for row in rows:
-                cols = row.find_all('td')
-                if len(cols) >= 7:
-                    date = cols[0].text.strip()
-                    time = cols[1].text.strip()
-                    country = cols[2].text.strip()
-                    event = cols[3].text.strip()
-                    importance = cols[4].get('title', '').strip() if cols[4].get('title') else cols[4].text.strip()
-                    actual = cols[5].text.strip()
-                    forecast = cols[6].text.strip()
-                    previous = cols[7].text.strip() if len(cols) > 7 else ''
-                    if country in ['United States', 'Euro Area', 'Germany', 'United Kingdom', 'China', 'Japan']:
-                        events.append({
-                            "Date": date,
-                            "Time": time,
-                            "Country": country,
-                            "Event": event,
-                            "Actual": actual,
-                            "Forecast": forecast,
-                            "Previous": previous,
-                            "Importance": importance
-                        })
-            df = pd.DataFrame(events)
-            return df
-        econ_df = fetch_economic_calendar()
-        if not econ_df.empty:
-            def impact_color(val):
-                if 'high' in str(val).lower():
-                    return 'background-color: #d93025; color: #fff; font-weight: bold;'
-                elif 'medium' in str(val).lower():
-                    return 'background-color: #fbbc04; color: #222; font-weight: bold;'
-                elif 'low' in str(val).lower():
-                    return 'background-color: #6ee26e; color: #222; font-weight: bold;'
-                else:
-                    return ''
-            styled = econ_df.style.applymap(impact_color, subset=['Importance'])
-            st.dataframe(styled, use_container_width=True, hide_index=True)
-        else:
-            st.warning("No economic events found. Showing example data.")
-            test_econ = pd.DataFrame({
-                'Date': ['2025-05-15', '2025-05-16'],
-                'Time': ['15:30', '17:00'],
-                'Country': ['United States', 'Euro Area'],
-                'Event': ['US Initial Jobless Claims', 'ECB Rate Decision'],
-                'Actual': ['-', '-'],
-                'Forecast': ['220K', '4.50%'],
-                'Previous': ['231K', '4.25%'],
-                'Importance': ['High', 'High']
-            })
-            st.dataframe(test_econ)
-    except Exception as e:
-        st.error(f"Error loading Economic Calendar: {e}")
-        test_econ = pd.DataFrame({
-            'Date': ['2025-05-15', '2025-05-16'],
-            'Time': ['15:30', '17:00'],
-            'Country': ['United States', 'Euro Area'],
-            'Event': ['US Initial Jobless Claims', 'ECB Rate Decision'],
-            'Actual': ['-', '-'],
-            'Forecast': ['220K', '4.50%'],
-            'Previous': ['231K', '4.25%'],
-            'Importance': ['High', 'High']
-        })
-        st.dataframe(test_econ)
+        test_df = test_df.reset_index(drop=True)
+        def color_mover(val):
+            try:
+                v = float(str(val).replace('%','').replace(',',''))
+                if v > 0:
+                    return 'color: #188038; font-weight: bold;'
+                elif v < 0:
+                    return 'color: #d93025; font-weight: bold;'
+            except:
+                pass
+            return ''
+        styled = test_df.style.applymap(color_mover, subset=['Change %'])
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+elif selected_nav == "News":
+    st.subheader('📰 Latest Market News')
+    feed_url = "https://news.google.com/rss/search?q=stock+market"
+    feed = feedparser.parse(feed_url)
+    if feed.entries:
+        st.markdown("""
+        <style>
+        .news-card-minimal {background: rgba(255,255,255,0.01); border-radius: 7px; padding: 10px 0 10px 0; margin-bottom: 7px; border-bottom: 1px solid #eee;}
+        .news-title-minimal {font-size: 1.08em; font-weight: 700; color: #222; text-decoration: none; line-height: 1.3;}
+        .news-domain-row {display: flex; align-items: center; gap: 7px; margin-top: 2px;}
+        .news-domain-minimal {font-size: 0.97em; color: #888;}
+        .news-summary-minimal {font-size: 0.97em; color: #888; font-style: italic; margin-top: 2px;}
+        @media (prefers-color-scheme: dark) {
+          .news-card-minimal {background: rgba(30,32,36,0.01); border-bottom: 1px solid #333;}
+          .news-title-minimal {color: #fff;}
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        for entry in feed.entries[:10]:
+            title = entry.title
+            link = entry.link
+            summary = entry.summary if hasattr(entry, 'summary') else ''
+            summary_short = summary[:80] + '...' if len(summary) > 80 else summary
+            parsed_url = urllib.parse.urlparse(link)
+            domain = parsed_url.netloc.replace('www.', '')
+            st.markdown(f"""
+            <div class='news-card-minimal'>
+                <a href='{link}' target='_blank' class='news-title-minimal'>{title}</a>
+                <div class='news-domain-row'>
+                    <span class='news-domain-minimal'>{domain}</span>
+                </div>
+                <div class='news-summary-minimal'>{summary_short}</div>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No news found.")
 elif selected_nav == "ETFs":
     st.subheader('Most Traded US ETFs')
     try:
@@ -214,7 +424,6 @@ elif selected_nav == "ETFs":
             'Volume': ['45,000,000', '38,000,000']
         })
         st.dataframe(test_etf)
-# ... existing code ...
 
 # Ticker list (move this up before async scraping)
 tickers = [
@@ -781,65 +990,5 @@ if 'GOOGL' in df_display.index and df_display.loc['GOOGL'].isnull().any():
     st.warning("GOOGL verileri alınamadı.")
 if 'Dow Jones' in index_prices and index_prices.get('Dow Jones') is None:
     st.warning("Dow Jones verisi alınamadı.")
-
-# --- Latest Market News ---
-st.markdown('---')
-st.header('📰 Latest Market News')
-
-feed_url = "https://news.google.com/rss/search?q=stock+market"
-feed = feedparser.parse(feed_url)
-
-if feed.entries:
-    st.markdown("""
-    <style>
-    .news-card-minimal {background: rgba(255,255,255,0.01); border-radius: 7px; padding: 10px 0 10px 0; margin-bottom: 7px; border-bottom: 1px solid #eee;}
-    .news-title-minimal {font-size: 1.08em; font-weight: 700; color: #222; text-decoration: none; line-height: 1.3;}
-    .news-domain-row {display: flex; align-items: center; gap: 7px; margin-top: 2px;}
-    .news-domain-minimal {font-size: 0.97em; color: #888;}
-    .news-summary-minimal {font-size: 0.97em; color: #888; font-style: italic; margin-top: 2px;}
-    @media (prefers-color-scheme: dark) {
-      .news-card-minimal {background: rgba(30,32,36,0.01); border-bottom: 1px solid #333;}
-      .news-title-minimal {color: #fff;}
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    for entry in feed.entries[:10]:
-        title = entry.title
-        link = entry.link
-        summary = entry.summary if hasattr(entry, 'summary') else ''
-        summary_short = summary[:80] + '...' if len(summary) > 80 else summary
-        parsed_url = urllib.parse.urlparse(link)
-        domain = parsed_url.netloc.replace('www.', '')
-        st.markdown(f"""
-        <div class='news-card-minimal'>
-            <a href='{link}' target='_blank' class='news-title-minimal'>{title}</a>
-            <div class='news-domain-row'>
-                <span class='news-domain-minimal'>{domain}</span>
-            </div>
-            <div class='news-summary-minimal'>{summary_short}</div>
-        </div>
-        """, unsafe_allow_html=True)
-else:
-    st.info("No news found.")
-
-def remove_week_caption():
-    pass  # This is just a placeholder to indicate removal 
-
-# NOTE: Google Finance scraping is slow for many tickers. For production, consider async requests or caching results. 
-
-# Remove the following from the end of the file:
-# @st.cache_data(ttl=3600)
-# def get_google_close_price_and_name(ticker):
-#     try:
-#         return yf.Ticker(ticker).info.get('shortName', ''), get_google_close_price_and_name(ticker)[0]
-#     except Exception:
-#         return '', 0 
-# ... rest of code unchanged ... 
-
-# --- MARKET MOVERS TAB ---
-# (Bu bölümü tamamen kaldır)
-
-# --- Market Movers veri çekme fonksiyonu ---
-# (Bu bölümü tamamen kaldır)
 
 # ... rest of the file remains unchanged ... 
